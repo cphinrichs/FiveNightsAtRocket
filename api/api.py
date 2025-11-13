@@ -1,5 +1,5 @@
 
-from flask import Flask, request, session, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import sqlite3
 import jwt
