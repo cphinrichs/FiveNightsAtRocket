@@ -1,0 +1,25 @@
+Game style:
+- top-down game where the player can walk around and interact with items (like Undertale)
+- there are enemies that chase the player based on certain conditions
+- player can open cameras like in Five Nights at Freddy's
+
+Map:
+- five rooms: office, break room, meeting room, classroom, hallway
+- break room has refrigerator and cabinets where the player can restock snacks and grab an egg
+- meeting room has camera to watch what is happening in other rooms
+- classroom has laptop that player has to use to work on coding project or to watch youtube
+- office has Jeromathy's desk
+
+Enemies:
+- Main character is Brenton
+- Jo-nathan kills the player unless the player has an egg, in which case he goes back to the classroom to eat it
+- If Jeromathy sees the snacks are depleted, he will chase and kill you; he regularly walks around the office and pauses at his desk
+- Angellica will kill you if she sees you on Youtube
+
+Mechanics:
+- Opening cameras drains a battery from 100%
+- If battery is 0%, you die
+- Watching youtube in the classroom makes time pass more quickly
+- Time slowly passes from 9am to 5pm and the player has to survive until 5pm to go home
+- There are five levels of Monday through Friday that must be completed to Watching
+- Add more mechanics as needed
