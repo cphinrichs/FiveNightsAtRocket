@@ -1,3 +1,4 @@
+# Deployment Notes
 ## Setting Up a Python Virtual Environment (.venv)
 
 Before launching the project, it is recommended to create a virtual environment to isolate dependencies.
@@ -33,6 +34,7 @@ Before launching the project, it is recommended to create a virtual environment 
 5. **Set the SECRET_KEY environment variable before launching the backend:**
 	 - The Flask backend requires an environment variable called `SECRET_KEY` for JWT authentication and session security.
 	 - Choose a strong, random secret key. Example: `PCNsflZmB8cPjuLgBBjsUqBIIqKDxZVC`
+	 	> **Note:** For security purposes, please do not actually use this example key.
 	 - On Windows (PowerShell):
 		 ```powershell
 		 $env:SECRET_KEY = "your_secret_key_here"
@@ -45,10 +47,12 @@ Before launching the project, it is recommended to create a virtual environment 
 		 ```bash
 		 export SECRET_KEY=your_secret_key_here
 		 ```
+	> **Note:** For proper encryption and decryption, please use the same secret key each time you create a new virtual environment. Consider adding a startup script to set the same secret key at the beginning of each session.
 
 ## Running Frontend and Backend Servers
 
 To run the frontend and backend servers simultaneously, use two separate terminal windows:
+> **Note:** The `/web` directory (frontend) can be located separately from the `/game` and `/api` directories (backend). However, `/game` and `/api` must be in the same parent directory as each other for correct backend operation so that the api can serve the game to the frontend.
 
 ### 1. Start the Backend (API)
 Open a terminal in the `/api` directory and run:

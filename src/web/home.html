@@ -57,7 +57,7 @@
                     document.getElementById('form-container').style.display = 'none';
                     // Call the protected REST route to get the game file (cookie will be sent automatically)
                     try {
-                        const gameResponse = await fetch('http://localhost:5000/game/main.html', {
+                        const gameResponse = await fetch('http://localhost:5000/game/build/web/index.html', {
                             method: 'GET',
                             credentials: 'include'
                         });
