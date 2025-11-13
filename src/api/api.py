@@ -25,35 +25,45 @@ CORS(app, supports_credentials=True)
 
 SECRET_KEY = os.environ.get('SECRET_KEY')  # Secret key for JWT encoding/decoding
 
-# Function to get a connection to the SQLite database
+
 def get_db_connection():
+    """
+    Create and return a connection to the SQLite database.
+    Sets row_factory for dict-like access to rows.
+    """
     conn = sqlite3.connect('users.db')
-    conn.row_factory = sqlite3.Row  # Allows dict-like access to rows
+    conn.row_factory = sqlite3.Row
     return conn
 
-# Function to initialize the database and create the users table if it doesn't exist
+
 def init_db():
+    """
+    Initialize the database and create the users table if it doesn't exist.
+    Adds a default admin user for testing if not present.
+    """
     conn = get_db_connection()
-    # Create users table with id, username, and password_hash columns
     conn.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL
     )''')
-    # Add a default user for testing (only if not already present)
     try:
         default_hash = generate_password_hash("rocket123")
         conn.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", ("admin", default_hash))
         conn.commit()
     except sqlite3.IntegrityError:
-        pass  # User already exists, skip adding
+        pass  # User already exists
     conn.close()
 
-# Route for user login
-# Accepts POST requests with JSON body containing username and password
-# Returns success if credentials match a user in the database
 @app.route('/login', methods=['POST'])
 def login():
+    """
+    User login endpoint.
+    Accepts POST requests with JSON body containing username and password.
+    Returns success if credentials match a user in the database.
+    Implements rate limiting by IP.
+    Sets JWT cookie on successful login.
+    """
     data = request.get_json()  # Parse JSON body
     username = data.get('username')
     password = data.get('password')
@@ -104,11 +114,14 @@ def login():
     # User not found or password incorrect
     return jsonify({"success": False, "message": "Invalid credentials."}), 401
 
-# Route for user signup (registration)
-# Accepts POST requests with JSON body containing username and password
-# Adds new user to the database if username is not taken
 @app.route('/signup', methods=['POST'])
 def signup():
+    """
+    User signup endpoint.
+    Accepts POST requests with JSON body containing username and password.
+    Adds new user to the database if username is not taken.
+    Hashes password before storing.
+    """
     data = request.get_json()  # Parse JSON body
     username = data.get('username')
     password = data.get('password')
@@ -130,10 +143,12 @@ def signup():
         conn.close()
         return jsonify({"success": False, "message": "Username already exists."}), 409
 
-# Route to serve game files securely to authenticated users
-# Only checks auth for index.html, allows other resources to load freely
 @app.route('/game/build/web/index.html', methods=['GET'])
 def serve_game_index():
+    """
+    Securely serve the main game index.html file to authenticated users.
+    Requires a valid JWT token in the cookie.
+    """
     token = request.cookies.get('jwt')
     print(f"Game index request")
     print(f"JWT from cookie: {token}")
@@ -153,14 +168,19 @@ def serve_game_index():
     print(f"Serving index.html")
     return send_from_directory('../game/build/web', 'index.html')
 
-# Route to serve other game resources (apk, images, etc.) without auth check
-# This is needed because the iframe loads these with relative paths
 @app.route('/game/build/web/<path:filename>', methods=['GET'])
 def serve_game_resources(filename):
+    """
+    Serve game resource files (apk, images, etc.) from the build/web directory.
+    No authentication required; used for resources loaded by the game iframe.
+    """
     print(f"Game resource request for: {filename}")
     return send_from_directory('../game/build/web', filename)
 
-# Main entry point: initialize database and start Flask app
+
 if __name__ == '__main__':
-    init_db()  # Ensure database and table exist
+    """
+    Main entry point: initialize database and start Flask app.
+    """
+    init_db()
     app.run(debug=True)
