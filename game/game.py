@@ -16,7 +16,7 @@ pygame.display.set_caption('Panoramic Room Camera')
 
 
 # List of room images
-room_images = ['images/break_room.jpg', 'images/hall_one.jpg']
+room_images = ['images/break_room.jpg', 'images/hall_one.jpg', 'images/test.jpg']
 current_room = 0
 
 def load_room_image(index):
