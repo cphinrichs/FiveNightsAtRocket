@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Five Nights At Rocket</title>
+    <link href="https://fonts.googleapis.com/css?family=Lato:400,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="body">
+    <h1 class="rocket-text">Five Nights At Rocket</h1>
+    <div id="form-container">
+        <form method="get" class="login-form" id="loginForm">
+            <input type="text" class="login-textbox" name="username" placeholder="Username" required>
+            <input type="password" class="login-textbox" name="password" placeholder="Password" required>
+            <br>
+            <button type="submit" class="login-button">Login</button>
+            <br>
+            <span>Don't have an account? <a href="#" id="showSignup">Sign up</a></span>
+        </form>
+        <form method="get" class="login-form" id="signupForm" style="display:none;">
+            <input type="text" class="login-textbox" name="username" placeholder="Username" required>
+            <input type="password" class="login-textbox" name="password" placeholder="Password" required>
+            <br>
+            <button type="submit" class="login-button">Sign Up</button>
+            <br>
+            <span>Already have an account? <a href="#" id="showLogin">Login</a></span>
+        </form>
+    </div>
+    <script>
+        // Swap between login and signup forms
+        document.getElementById('showSignup').addEventListener('click', function(e) {
+            e.preventDefault();
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('signupForm').style.display = 'flex';
+        });
+        document.getElementById('showLogin').addEventListener('click', function(e) {
+            e.preventDefault();
+            document.getElementById('signupForm').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'flex';
+        });
+
+        // Login form submit
+        document.getElementById('loginForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const username = event.target.username.value;
+            const password = event.target.password.value;
+            try {
+                const response = await fetch('http://localhost:5000/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ "username": username, "password": password }),
+                    credentials: 'include'
+                });
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    document.getElementById('form-container').style.display = 'none';
+                    // Call the protected REST route to get the game file (cookie will be sent automatically)
+                    try {
+                        const gameResponse = await fetch('http://localhost:5000/game/main.html', {
+                            method: 'GET',
+                            credentials: 'include'
+                        });
+                        if (gameResponse.ok) {
+                            // Get the actual URL from the response (supporting redirects or dynamic filenames)
+                            const url = gameResponse.url;
+                            document.getElementById('game').innerHTML = `<iframe src="${url}" width="800" height="600" style="border:none;"></iframe>`;
+                        } else {
+                            alert('Unable to load game. Returning to login screen.');
+                            // Show login form again and clear game area
+                            document.getElementById('form-container').style.display = 'flex';
+                            document.getElementById('loginForm').style.display = 'flex';
+                            document.getElementById('game').innerHTML = '';
+                        }
+                    } catch (err) {
+                        alert('Network error loading game.');
+                    }
+                } else {
+                    alert(result.message || 'Login failed. Please try again.');
+                }
+            } catch (error) {
+                alert('Network error. Please try again later.');
+            }
+        });
+
+        // Signup form submit
+        document.getElementById('signupForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const username = event.target.username.value;
+            const password = event.target.password.value;
+            try {
+                const response = await fetch('http://localhost:5000/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ "username": username, "password": password })
+                });
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    alert('Signup successful! You can now log in.');
+                    document.getElementById('signupForm').reset();
+                    document.getElementById('signupForm').style.display = 'none';
+                    document.getElementById('loginForm').style.display = 'flex';
+                } else {
+                    alert(result.message || 'Signup failed. Please try again.');
+                }
+            } catch (error) {
+                alert('Network error. Please try again later.');
+            }
+        });
+    </script>
+    <div id="game"></div>
+</body>
+</html>
