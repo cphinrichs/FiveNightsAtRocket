@@ -37,7 +37,10 @@ class Renderer:
         """Render a complete frame."""
         self.screen.fill(COLOR_BG)
         
-        if game_state.free_roam_mode and game_state.is_playing():
+        # If computer is active and player is in office, show working screen
+        if game_state.computer_active and not game_state.free_roam_mode and not game_state.camera_active:
+            self._render_working_screen()
+        elif game_state.free_roam_mode and game_state.is_playing():
             self._render_free_roam_view()
         elif game_state.camera_active and game_state.is_playing():
             self._render_camera_view(camera)
@@ -71,45 +74,69 @@ class Renderer:
             if enemies_here:
                 self._render_enemies_on_camera(enemies_here)
             
-        # Draw camera label
-        font = self.assets.get_font('large')
+        # Draw camera label with background
+        font = self.assets.get_font('medium')
         txt = font.render(f"CAM: {room_name}", True, COLOR_TITLE)
-        self.screen.blit(txt, (40, 40))
+        
+        label_bg = pygame.Surface((txt.get_width() + 20, txt.get_height() + 10), pygame.SRCALPHA)
+        pygame.draw.rect(label_bg, (0, 0, 0, 180), label_bg.get_rect())
+        self.screen.blit(label_bg, (30, 30))
+        self.screen.blit(txt, (40, 35))
+        
+    def _render_working_screen(self):
+        """Render the working screen (computer view)."""
+        working_image = self.assets.get_working_image()
+        
+        if working_image:
+            # Scale image to fit screen
+            img_w, img_h = working_image.get_size()
+            
+            # Scale to fill screen height
+            scale = HEIGHT / img_h
+            scaled_w = int(img_w * scale)
+            scaled_h = HEIGHT
+            
+            # If wider than screen, scale to width instead
+            if scaled_w > WIDTH:
+                scale = WIDTH / img_w
+                scaled_w = WIDTH
+                scaled_h = int(img_h * scale)
+            
+            scaled_image = pygame.transform.smoothscale(working_image, (scaled_w, scaled_h))
+            
+            # Center on screen
+            x_offset = (WIDTH - scaled_w) // 2
+            y_offset = (HEIGHT - scaled_h) // 2
+            self.screen.blit(scaled_image, (x_offset, y_offset))
+        else:
+            # Fallback if image not loaded
+            self.screen.fill((20, 30, 40))
+            font = self.assets.get_font('large')
+            txt = font.render("WORKING...", True, (100, 255, 100))
+            self.screen.blit(txt, (WIDTH//2 - txt.get_width()//2, HEIGHT//2 - txt.get_height()//2))
         
     def _render_office_view(self, game_state: GameState):
         """Render the office view."""
         pygame.draw.rect(self.screen, COLOR_OFFICE_BG, (0, 0, WIDTH, HEIGHT))
         
-        # Draw computer screen indicator
+        # Draw computer screen indicator (smaller, less obtrusive)
         computer_color = (100, 200, 100) if game_state.computer_active else (50, 50, 70)
-        computer_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 - 100, 300, 200)
+        computer_rect = pygame.Rect(WIDTH//2 - 100, HEIGHT//2 - 60, 200, 120)
         pygame.draw.rect(self.screen, computer_color, computer_rect)
-        pygame.draw.rect(self.screen, (255, 255, 255), computer_rect, 3)
+        pygame.draw.rect(self.screen, (80, 80, 80), computer_rect, 2)
         
-        # Computer status text
-        font_med = self.assets.get_font('medium')
+        # Small computer status indicator
+        font_small = self.assets.get_font('small')
         if game_state.computer_active:
-            comp_txt = font_med.render("WORKING", True, (50, 255, 50))
-            self.screen.blit(comp_txt, (WIDTH//2 - comp_txt.get_width()//2, HEIGHT//2 - 50))
+            comp_txt = font_small.render("WORKING", True, (50, 255, 50))
         else:
-            comp_txt = font_med.render("Slacking on Phone...", True, (255, 100, 100))
-            self.screen.blit(comp_txt, (WIDTH//2 - comp_txt.get_width()//2, HEIGHT//2 - 50))
-        
-        # Draw office title
-        font = self.assets.get_font('large')
-        office_txt = font.render("OFFICE", True, COLOR_TITLE)
-        self.screen.blit(office_txt, (WIDTH//2 - office_txt.get_width()//2, 40))
+            comp_txt = font_small.render("Slacking...", True, (255, 150, 150))
+        self.screen.blit(comp_txt, (WIDTH//2 - comp_txt.get_width()//2, HEIGHT//2 - 10))
         
         # Draw door indicators showing if enemies are at doors
         if self.enemy_manager:
             left_enemies, right_enemies = self.enemy_manager.get_enemies_at_doors()
             self._render_door_warnings(left_enemies, right_enemies)
-        
-        # Show prompt to enter free roam
-        if not game_state.camera_active:
-            font_small = self.assets.get_font('medium')
-            prompt = font_small.render("Press W to leave office | SPACE to toggle computer", True, (180, 180, 180))
-            self.screen.blit(prompt, (WIDTH//2 - prompt.get_width()//2, HEIGHT - 200))
     
     def _render_free_roam_view(self):
         """Render the free roam mode view."""
@@ -184,16 +211,16 @@ class Renderer:
                 name_bg.blit(name_txt, (5, 2))
                 self.screen.blit(name_bg, (enemy_x - 5, enemy_y - 30))
         
-        # Draw room name
-        font = self.assets.get_font('large')
+        # Draw room name in corner
+        font = self.assets.get_font('medium')
         room_txt = font.render(room.name, True, COLOR_TITLE)
-        self.screen.blit(room_txt, (20, 20))
         
-        # Draw instructions
-        font_small = self.assets.get_font('medium')
-        instructions = font_small.render("ESC - Return to Office | WASD/Arrows - Move", True, (180, 180, 180))
-        self.screen.blit(instructions, (20, HEIGHT - 30))
-    
+        # Add background for room name
+        name_bg = pygame.Surface((room_txt.get_width() + 20, room_txt.get_height() + 10), pygame.SRCALPHA)
+        pygame.draw.rect(name_bg, (0, 0, 0, 180), name_bg.get_rect())
+        self.screen.blit(name_bg, (10, 10))
+        self.screen.blit(room_txt, (20, 15))
+        
     def _draw_wall(self, rect: pygame.Rect):
         """Draw a textured wall."""
         wall_color = (55, 55, 60)
@@ -264,49 +291,112 @@ class Renderer:
         
     def _render_hud(self, game_state: GameState):
         """Render HUD elements."""
-        font = self.assets.get_font('medium')
+        font = self.assets.get_font('small')
+        
+        # Create semi-transparent background for HUD
+        hud_bg = pygame.Surface((WIDTH, 140), pygame.SRCALPHA)
+        pygame.draw.rect(hud_bg, (0, 0, 0, 180), hud_bg.get_rect())
+        self.screen.blit(hud_bg, (0, HEIGHT - 140))
         
         if game_state.free_roam_mode:
-            # Simplified HUD for free roam
-            hud_lines = [
-                f"Power: {game_state.power:05.1f}%",
-                f"Egg: {'YES' if game_state.has_egg else 'NO'}",
-                f"Fridge: {game_state.fridge_stock}/3",
-                f"Time: {int(game_state.night_time)}s / {int(game_state.night_time // 60)}m",
-            ]
+            # Compact HUD for free roam - single row
+            hud_text = f"Power: {game_state.power:05.1f}%  |  Egg: {'YES' if game_state.has_egg else 'NO'}  |  Fridge: {game_state.fridge_stock}/3  |  Time: {int(game_state.night_time)}s"
+            txt = font.render(hud_text, True, COLOR_TEXT)
+            self.screen.blit(txt, (20, HEIGHT - 30))
         else:
-            status_icon = "💻" if game_state.computer_active else "📱"
-            hud_lines = [
+            # Office HUD - organized in columns
+            y_start = HEIGHT - 130
+            
+            # Left column - Status
+            status_lines = [
                 f"Power: {game_state.power:05.1f}%",
-                f"Status: {status_icon} {'WORKING' if game_state.computer_active else 'SLACKING'}",
-                f"Egg: {'YES' if game_state.has_egg else 'NO'}",
-                f"Fridge: {game_state.fridge_stock}/3 items",
-                f"Camera: {'ON' if game_state.camera_active else 'OFF'} (C) | Computer: (SPACE)",
-                f"Doors: L={'CLOSED' if game_state.left_door_closed else 'OPEN'} (A) | R={'CLOSED' if game_state.right_door_closed else 'OPEN'} (D)",
-                f"Time: {int(game_state.night_time)}s / {int(game_state.night_time // 60)}m",
+                f"Time: {int(game_state.night_time)}s ({int(game_state.night_time // 60)}m)",
             ]
-        
-        for i, line in enumerate(hud_lines):
-            txt = font.render(line, True, COLOR_TEXT)
-            self.screen.blit(txt, (20, HEIGHT - 30 - (len(hud_lines)-i)*28))
+            for i, line in enumerate(status_lines):
+                txt = font.render(line, True, COLOR_TEXT)
+                self.screen.blit(txt, (20, y_start + i * 25))
+            
+            # Middle column - Resources
+            resource_lines = [
+                f"Egg: {'✓ YES' if game_state.has_egg else '✗ NO'}",
+                f"Fridge: {game_state.fridge_stock}/3",
+            ]
+            for i, line in enumerate(resource_lines):
+                txt = font.render(line, True, COLOR_TEXT)
+                self.screen.blit(txt, (220, y_start + i * 25))
+            
+            # Right column - Controls
+            status_icon = "💻" if game_state.computer_active else "📱"
+            control_lines = [
+                f"{status_icon} {'WORK' if game_state.computer_active else 'SLACK'} [SPACE]",
+                f"Camera: {'ON' if game_state.camera_active else 'OFF'} [C]",
+                f"Doors: L[A] R[D]",
+                f"Leave: [W]",
+            ]
+            for i, line in enumerate(control_lines):
+                txt = font.render(line, True, COLOR_TEXT)
+                self.screen.blit(txt, (WIDTH - 220, y_start + i * 25))
             
     def _render_game_over(self):
         """Render game over screen."""
-        font_large = self.assets.get_font('large')
-        font_med = self.assets.get_font('medium')
+        # Dark overlay
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, (0, 0, 0, 200), overlay.get_rect())
+        self.screen.blit(overlay, (0, 0))
         
+        # Game over box
+        box_width = 600
+        box_height = 250
+        box_x = (WIDTH - box_width) // 2
+        box_y = (HEIGHT - box_height) // 2
+        
+        # Box background
+        pygame.draw.rect(self.screen, (40, 20, 20), (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(self.screen, COLOR_GAME_OVER, (box_x, box_y, box_width, box_height), 4)
+        
+        # Title
+        font_large = self.assets.get_font('large')
         txt = font_large.render("GAME OVER", True, COLOR_GAME_OVER)
-        self.screen.blit(txt, (WIDTH//2 - txt.get_width()//2, HEIGHT//2 - txt.get_height()//2 - 30))
+        self.screen.blit(txt, (WIDTH//2 - txt.get_width()//2, box_y + 30))
         
     def _render_game_over_message(self, game_state: GameState):
         """Render the game over message if present."""
         if game_state.death_message:
-            font = self.assets.get_font('medium')
-            txt = font.render(game_state.death_message, True, COLOR_GAME_OVER)
-            self.screen.blit(txt, (WIDTH//2 - txt.get_width()//2, HEIGHT//2 + 20))
+            font_med = self.assets.get_font('medium')
+            font_small = self.assets.get_font('small')
+            
+            # Death message
+            txt = font_med.render(game_state.death_message, True, (255, 180, 180))
+            self.screen.blit(txt, (WIDTH//2 - txt.get_width()//2, HEIGHT//2 + 10))
+            
+            # Restart instruction
+            restart_txt = font_small.render("Press R to Restart", True, (200, 200, 200))
+            self.screen.blit(restart_txt, (WIDTH//2 - restart_txt.get_width()//2, HEIGHT//2 + 60))
         
     def _render_win(self):
         """Render win screen."""
-        font = self.assets.get_font('large')
-        txt = font.render("6 AM - YOU WIN!", True, COLOR_WIN)
-        self.screen.blit(txt, (WIDTH//2 - txt.get_width()//2, HEIGHT//2 - txt.get_height()//2))
+        # Light overlay
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, (0, 50, 0, 200), overlay.get_rect())
+        self.screen.blit(overlay, (0, 0))
+        
+        # Win box
+        box_width = 600
+        box_height = 250
+        box_x = (WIDTH - box_width) // 2
+        box_y = (HEIGHT - box_height) // 2
+        
+        # Box background
+        pygame.draw.rect(self.screen, (20, 40, 20), (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(self.screen, COLOR_WIN, (box_x, box_y, box_width, box_height), 4)
+        
+        # Title
+        font_large = self.assets.get_font('large')
+        font_small = self.assets.get_font('small')
+        
+        txt = font_large.render("6 AM - YOU WIN!", True, COLOR_WIN)
+        self.screen.blit(txt, (WIDTH//2 - txt.get_width()//2, box_y + 50))
+        
+        # Restart instruction
+        restart_txt = font_small.render("Press R to Restart", True, (200, 200, 200))
+        self.screen.blit(restart_txt, (WIDTH//2 - restart_txt.get_width()//2, box_y + 150))

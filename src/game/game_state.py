@@ -107,3 +107,20 @@ class GameState:
     def is_playing(self) -> bool:
         """Check if game is still in play."""
         return not self.game_over and not self.win
+    
+    def reset(self):
+        """Reset the game to initial state."""
+        from config import POWER_MAX
+        
+        self.game_over = False
+        self.win = False
+        self.death_message = ""
+        self.night_time = 0.0
+        self.free_roam_mode = False
+        self.camera_active = False
+        self.left_door_closed = False
+        self.right_door_closed = False
+        self.computer_active = False
+        self.has_egg = False
+        self.fridge_stock = 3
+        self.power = POWER_MAX

@@ -49,33 +49,41 @@ async def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 game_state.running = False
-            elif event.type == pygame.KEYDOWN and game_state.is_playing():
-                if event.key == pygame.K_ESCAPE:
-                    if game_state.free_roam_mode:
-                        # Exit free roam back to office
-                        game_state.exit_free_roam()
-                        free_roam.reset_to_office()
-                    else:
-                        game_state.running = False
-                elif event.key == pygame.K_w and not game_state.free_roam_mode and not game_state.camera_active:
-                    # Enter free roam mode from office
-                    game_state.enter_free_roam()
-                elif not game_state.free_roam_mode:
-                    # Office controls
-                    if event.key == pygame.K_c:
-                        game_state.toggle_camera()
-                    elif event.key == pygame.K_SPACE:
-                        # Toggle computer (pretending to work)
-                        game_state.toggle_computer()
-                    elif event.key == pygame.K_a:
-                        game_state.toggle_left_door()
-                    elif event.key == pygame.K_d:
-                        game_state.toggle_right_door()
-                    elif game_state.camera_active:
-                        if event.key == pygame.K_LEFT:
-                            camera.switch_room(-1)
-                        elif event.key == pygame.K_RIGHT:
-                            camera.switch_room(1)
+            elif event.type == pygame.KEYDOWN:
+                # Restart on R key if game is over
+                if (game_state.game_over or game_state.win) and event.key == pygame.K_r:
+                    game_state.reset()
+                    free_roam.reset_to_office()
+                    # Reset all enemies
+                    for enemy in enemy_manager.enemies:
+                        enemy.reset_position(ENEMY_PATH[0])
+                elif game_state.is_playing():
+                    if event.key == pygame.K_ESCAPE:
+                        if game_state.free_roam_mode:
+                            # Exit free roam back to office
+                            game_state.exit_free_roam()
+                            free_roam.reset_to_office()
+                        else:
+                            game_state.running = False
+                    elif event.key == pygame.K_w and not game_state.free_roam_mode and not game_state.camera_active:
+                        # Enter free roam mode from office
+                        game_state.enter_free_roam()
+                    elif not game_state.free_roam_mode:
+                        # Office controls
+                        if event.key == pygame.K_c:
+                            game_state.toggle_camera()
+                        elif event.key == pygame.K_SPACE:
+                            # Toggle computer (pretending to work)
+                            game_state.toggle_computer()
+                        elif event.key == pygame.K_a:
+                            game_state.toggle_left_door()
+                        elif event.key == pygame.K_d:
+                            game_state.toggle_right_door()
+                        elif game_state.camera_active:
+                            if event.key == pygame.K_LEFT:
+                                camera.switch_room(-1)
+                            elif event.key == pygame.K_RIGHT:
+                                camera.switch_room(1)
         
         # Update game logic
         dt = clock.tick(FPS) / 1000.0
