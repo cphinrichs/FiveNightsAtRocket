@@ -6,6 +6,11 @@ import jwt
 import datetime
 import os
 from werkzeug.security import generate_password_hash, check_password_hash
+import mimetypes
+
+# Add MIME types for Pygbag files
+mimetypes.add_type('application/wasm', '.wasm')
+mimetypes.add_type('application/vnd.android.package-archive', '.apk')
 
 # Simple in-memory rate limiting (per IP)
 from collections import defaultdict
@@ -90,7 +95,7 @@ def login():
             token,
             httponly=True,
             secure=False,  # Use True only with HTTPS in production
-            samesite='Strict',
+            samesite='Lax',  # Changed from 'Strict' to 'Lax' for iframe compatibility
             max_age=3600,
             path='/'
         )
@@ -126,12 +131,11 @@ def signup():
         return jsonify({"success": False, "message": "Username already exists."}), 409
 
 # Route to serve game files securely to authenticated users
-# Usage: /game/<filename> (e.g., /game/main.html)
-# Requires a valid JWT token in the Authorization header
-@app.route('/game/<path:filename>', methods=['GET'])
-def serve_game_file(filename):
+# Only checks auth for index.html, allows other resources to load freely
+@app.route('/game/build/web/index.html', methods=['GET'])
+def serve_game_index():
     token = request.cookies.get('jwt')
-    print(f"Game file request for: {filename}")
+    print(f"Game index request")
     print(f"JWT from cookie: {token}")
     if not token:
         print("No JWT cookie found.")
@@ -145,9 +149,16 @@ def serve_game_file(filename):
     except jwt.InvalidTokenError:
         print("Invalid JWT.")
         return jsonify({'success': False, 'message': 'Invalid token.'}), 401
-    # If valid, serve the requested game file from the game directory
-    print(f"Serving file: {filename}")
-    return send_from_directory('../game', filename)
+    # If valid, serve the index.html
+    print(f"Serving index.html")
+    return send_from_directory('../game/build/web', 'index.html')
+
+# Route to serve other game resources (apk, images, etc.) without auth check
+# This is needed because the iframe loads these with relative paths
+@app.route('/game/build/web/<path:filename>', methods=['GET'])
+def serve_game_resources(filename):
+    print(f"Game resource request for: {filename}")
+    return send_from_directory('../game/build/web', filename)
 
 # Main entry point: initialize database and start Flask app
 if __name__ == '__main__':
