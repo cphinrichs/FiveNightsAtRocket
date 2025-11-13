@@ -49,6 +49,7 @@ Before launching the project, it is recommended to create a virtual environment 
 ## Running Frontend and Backend Servers
 
 To run the frontend and backend servers simultaneously, use two separate terminal windows:
+> **Note:** The `/web` directory (frontend) can be located separately from the `/game` and `/api` directories (backend). However, `/game` and `/api` must be in the same parent directory as each other for correct backend operation so that the api can serve the game to the frontend.
 
 ### 1. Start the Backend (API)
 Open a terminal in the `/api` directory and run:
