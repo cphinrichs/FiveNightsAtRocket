@@ -49,6 +49,21 @@ Before launching the project, it is recommended to create a virtual environment 
 		 ```
 	> **Note:** For proper encryption and decryption, please use the same secret key each time you create a new virtual environment. Consider adding a startup script to set the same secret key at the beginning of each session.
 
+## Packaging the game
+
+To package the game for web deployment using Pygbag:
+1. **Open a terminal in the game directory:**
+	```powershell
+	cd src/game
+	```
+
+2. **Run Pygbag to build the game:**
+	```powershell
+	python -m pygbag --build main.py
+	```
+
+This will create a `build/web` directory containing `index.html`, `game.apk`, and other files needed to run the game in a browser.
+
 ## Running Frontend and Backend Servers
 
 To run the frontend and backend servers simultaneously, use two separate terminal windows:
