@@ -1,108 +1,103 @@
-# Simple Checkers game with click and drag using pygame
-# Pygbag-compatible version with async/await
+"""Minimal Five Nights at Freddy's style prototype for Pygbag/browser.
+Refactored into modular architecture.
+Controls: C = camera, A/D = doors, LEFT/RIGHT = switch rooms, ESC = quit (native only)
+"""
 import pygame
 import asyncio
 
-# Constants
-WIDTH, HEIGHT = 640, 640
-ROWS, COLS = 8, 8
-SQUARE_SIZE = WIDTH // COLS
+from config import (
+    WIDTH, HEIGHT, FPS,
+    POWER_DRAIN_BASE, POWER_DRAIN_CAMERA, POWER_DRAIN_DOOR,
+    ENEMY_PATH, ENEMY_MOVE_INTERVAL, ENEMY_ATTACK_INTERVAL, ENEMIES
+)
+from assets import AssetManager
+from game_state import GameState
+from camera import Camera
+from renderer import Renderer
+from enemies import EnemyManager, Enemy
 
-# Colors
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-RED = (255, 0, 0)
-GRAY = (128, 128, 128)
-GREEN = (0, 255, 0)
-
-# Board setup
-def create_board():
-    board = [[None for _ in range(COLS)] for _ in range(ROWS)]
-    for row in range(ROWS):
-        for col in range(COLS):
-            if (row + col) % 2 == 1:
-                if row < 3:
-                    board[row][col] = 'b'  # Black piece
-                elif row > 4:
-                    board[row][col] = 'r'  # Red piece
-    return board
-
-def draw_board(win, board, dragging_piece=None, dragging_pos=None):
-    win.fill(WHITE)
-    for row in range(ROWS):
-        for col in range(COLS):
-            color = GRAY if (row + col) % 2 == 1 else WHITE
-            pygame.draw.rect(win, color, (col*SQUARE_SIZE, row*SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE))
-            piece = board[row][col]
-            if piece and (dragging_piece != (row, col)):
-                center = (col*SQUARE_SIZE + SQUARE_SIZE//2, row*SQUARE_SIZE + SQUARE_SIZE//2)
-                pygame.draw.circle(win, BLACK if piece == 'b' else RED, center, SQUARE_SIZE//2 - 10)
-    # Draw dragging piece
-    if dragging_piece and dragging_pos:
-        r, c = dragging_piece
-        piece = board[r][c]
-        pygame.draw.circle(win, BLACK if piece == 'b' else RED, dragging_pos, SQUARE_SIZE//2 - 10)
-    pygame.display.update()
-
-def get_square(pos):
-    x, y = pos
-    col = x // SQUARE_SIZE
-    row = y // SQUARE_SIZE
-    if 0 <= row < ROWS and 0 <= col < COLS:
-        return row, col
-    return None
 
 async def main():
-    # Initialize pygame inside the async main function for Pygbag compatibility
+    """Main game loop."""
     pygame.init()
-    WIN = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Simple Checkers")
-    
-    board = create_board()
-    dragging = False
-    dragging_piece = None
-    dragging_pos = None
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Five Nights at Rocket")
     clock = pygame.time.Clock()
-    running = True
     
-    while running:
+    # Initialize game systems
+    assets = AssetManager()
+    assets.load_all()
+    
+    game_state = GameState()
+    camera = Camera()
+    renderer = Renderer(screen, assets)
+    
+    # Initialize enemies
+    enemy_manager = EnemyManager(ENEMY_PATH, ENEMY_MOVE_INTERVAL, ENEMY_ATTACK_INTERVAL)
+    for enemy_name, starting_room, aggression in ENEMIES:
+        enemy_manager.add_enemy(Enemy(enemy_name, starting_room, aggression))
+    
+    # Link enemy manager to renderer
+    renderer.set_enemy_manager(enemy_manager)
+    
+    # Main game loop
+    while game_state.running:
+        # Handle events
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                pos = pygame.mouse.get_pos()
-                square = get_square(pos)
-                if square:
-                    r, c = square
-                    if board[r][c]:
-                        dragging = True
-                        dragging_piece = (r, c)
-                        dragging_pos = pos
-            elif event.type == pygame.MOUSEBUTTONUP:
-                if dragging and dragging_piece:
-                    pos = pygame.mouse.get_pos()
-                    square = get_square(pos)
-                    r0, c0 = dragging_piece
-                    if square:
-                        r1, c1 = square
-                        # Only allow move to empty dark square
-                        if board[r1][c1] is None and (r1 + c1) % 2 == 1:
-                            board[r1][c1] = board[r0][c0]
-                            board[r0][c0] = None
-                    dragging = False
-                    dragging_piece = None
-                    dragging_pos = None
-            elif event.type == pygame.MOUSEMOTION:
-                if dragging:
-                    dragging_pos = pygame.mouse.get_pos()
+                game_state.running = False
+            elif event.type == pygame.KEYDOWN and game_state.is_playing():
+                if event.key == pygame.K_ESCAPE:
+                    game_state.running = False
+                elif event.key == pygame.K_c:
+                    game_state.toggle_camera()
+                elif event.key == pygame.K_a:
+                    game_state.toggle_left_door()
+                elif event.key == pygame.K_d:
+                    game_state.toggle_right_door()
+                elif game_state.camera_active:
+                    if event.key == pygame.K_LEFT:
+                        camera.switch_room(-1)
+                    elif event.key == pygame.K_RIGHT:
+                        camera.switch_room(1)
         
-        draw_board(WIN, board, dragging_piece, dragging_pos)
-        clock.tick(60)
+        # Update game logic
+        dt = clock.tick(FPS) / 1000.0
         
-        # Yield control to the browser event loop (required for Pygbag)
-        await asyncio.sleep(0)
+        if game_state.is_playing():
+            # Calculate power drain
+            drain = POWER_DRAIN_BASE
+            if game_state.camera_active:
+                drain += POWER_DRAIN_CAMERA
+            if game_state.left_door_closed:
+                drain += POWER_DRAIN_DOOR
+            if game_state.right_door_closed:
+                drain += POWER_DRAIN_DOOR
+                
+            game_state.update(dt, drain)
+            
+            # Update enemies
+            attacking_enemy = enemy_manager.update(
+                dt, 
+                game_state.left_door_closed, 
+                game_state.right_door_closed
+            )
+            if attacking_enemy:
+                game_state.enemy_attack(attacking_enemy)
+            
+            # Update camera if active
+            if game_state.camera_active:
+                room_image = assets.get_room_image(camera.get_current_room_name())
+                camera.update(dt, room_image)
+        
+        # Render
+        renderer.render_frame(game_state, camera)
+        
+        # Yield to browser (required for Pygbag)
+        await asyncio.sleep(0.016)
     
     pygame.quit()
 
-# Run the async main function
-asyncio.run(main())
+
+if __name__ == "__main__":
+    asyncio.run(main())
