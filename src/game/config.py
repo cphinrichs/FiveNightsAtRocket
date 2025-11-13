@@ -11,10 +11,11 @@ CAMERA_ZOOM = 1.5  # Zoom factor for camera view
 
 # Gameplay settings
 POWER_MAX = 100.0
-POWER_DRAIN_BASE = 0.1
+POWER_DRAIN_BASE = 0.05  # Reduced base drain (slacking on phone)
 POWER_DRAIN_CAMERA = 0.2
 POWER_DRAIN_DOOR = 0.3
-WIN_TIME = 60  # seconds to survive
+POWER_DRAIN_COMPUTER = 0.15  # Power drain when using computer/laptop
+WIN_TIME = 360  # 6 minutes (360 seconds) to survive
 
 # Paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,10 +34,12 @@ ENEMY_MOVE_INTERVAL = 10.0  # Base seconds between enemy moves
 ENEMY_ATTACK_INTERVAL = 5.0  # Seconds at door before attack
 ENEMY_PATH = ["Entrance", "Hallway", "Break Room"]  # Path enemies follow to office
 
-# Enemy definitions (name, starting_room, aggression_level)
+# Enemy definitions (name, starting_room, aggression_level, behavior_type)
 ENEMIES = [
-    ("Intern-Bot", "Entrance", 1.0),
-    ("Manager-Tron", "Entrance", 1.5),
+    ("Angela", "Entrance", 1.2, "slacking_checker"),  # Catches you slacking
+    ("Angel", "Entrance", 1.0, "slacking_checker"),   # Also catches you slacking
+    ("Johnathan", "Entrance", 1.5, "egg_checker"),    # Needs egg protection
+    ("Jerome", "Entrance", 0.8, "fridge_checker"),    # Checks fridge stock
 ]
 
 # Colors

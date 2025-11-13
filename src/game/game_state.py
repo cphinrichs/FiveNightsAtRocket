@@ -16,10 +16,18 @@ class GameState:
         # Time tracking
         self.night_time = 0.0
         
+        # Game mode
+        self.free_roam_mode = False  # True when player leaves office
+        
         # Player controls
         self.camera_active = False
         self.left_door_closed = False
         self.right_door_closed = False
+        
+        # New mechanics
+        self.computer_active = False  # True when "working" on computer
+        self.has_egg = False  # True if player has an egg
+        self.fridge_stock = 3  # Number of items in fridge (starts full)
         
         # Power system
         self.power = POWER_MAX
@@ -57,6 +65,44 @@ class GameState:
     def toggle_right_door(self):
         """Toggle right door open/closed."""
         self.right_door_closed = not self.right_door_closed
+        
+    def toggle_computer(self):
+        """Toggle computer on/off (pretending to work)."""
+        self.computer_active = not self.computer_active
+        
+    def pickup_egg(self):
+        """Pick up an egg."""
+        self.has_egg = True
+        
+    def lose_egg(self):
+        """Lose/give away egg."""
+        self.has_egg = False
+        
+    def restock_fridge(self):
+        """Add an item to the fridge."""
+        if self.fridge_stock < 3:
+            self.fridge_stock += 1
+            return True
+        return False
+        
+    def deplete_fridge(self):
+        """Remove an item from fridge (natural depletion over time)."""
+        if self.fridge_stock > 0:
+            self.fridge_stock -= 1
+    
+    def is_slacking(self) -> bool:
+        """Check if player is currently slacking (not on computer and not in free roam)."""
+        return not self.computer_active and not self.free_roam_mode and not self.camera_active
+        
+    def enter_free_roam(self):
+        """Enter free roam mode (leave office)."""
+        self.free_roam_mode = True
+        self.camera_active = False
+        self.computer_active = False  # Can't use computer while walking
+        
+    def exit_free_roam(self):
+        """Return to office from free roam."""
+        self.free_roam_mode = False
         
     def is_playing(self) -> bool:
         """Check if game is still in play."""
