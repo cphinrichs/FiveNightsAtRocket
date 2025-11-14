@@ -542,6 +542,8 @@ class NextGenIntern(Enemy):
                 if player.inventory["snacks"] > 0:
                     player.inventory["snacks"] -= 1
                     game_instance.show_message("NextGen Intern took a snack!", 2.0)
+                    # Play random snack taken sound
+                    game_instance.play_random_snack_taken_sound(volume=1.0)
                 self.going_for_snack = False
                 self.returning_to_classroom = True
                 self.state = "returning"
