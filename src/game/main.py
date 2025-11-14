@@ -6,6 +6,7 @@ Navigate the office, avoid enemies, manage resources, and survive until 5pm
 import asyncio
 import pygame
 import sys
+import os
 from typing import Dict, List, Tuple, Optional
 import math
 import random
@@ -22,6 +23,7 @@ from room import Room
 
 # Initialize Pygame
 pygame.init()
+pygame.mixer.init()  # Initialize audio mixer
 
 
 # ============================================================
@@ -35,6 +37,21 @@ class Game:
         self.clock = pygame.time.Clock()
         self.running = True
         self.state = GameState.MENU
+        
+        # Background music
+        self.music_loaded = False
+        self.load_background_music()
+        
+        # Sound effects
+        self.sounds = {}
+        self.load_sound_effects()
+        
+        # Warning sound tracking
+        self.low_bandwidth_warning_played = False
+        
+        # Footstep sound timing
+        self.footstep_timer = 0.0
+        self.footstep_interval = 0.4  # Play footstep every 0.4 seconds while moving
         
         # Game time
         self.current_time = 9.0  # 9:00 AM
@@ -104,6 +121,237 @@ class Game:
         self.jumpscare_image = None
         
         self._init_game()
+    
+    def load_background_music(self):
+        """Load and prepare background music (will start when game starts)"""
+        try:
+            # Check if pygame mixer is available
+            if not pygame.mixer.get_init():
+                print("WARNING: pygame.mixer is not initialized!")
+                self.music_loaded = False
+                return
+            
+            # Try relative path first (works in pygbag)
+            music_path = 'audio/dnd_background_music.mp3'
+            print(f"DEBUG: Checking relative path: {music_path}")
+            print(f"DEBUG: Current working directory: {os.getcwd()}")
+            
+            if not os.path.exists(music_path):
+                # Fallback to absolute path (works in desktop)
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                music_path = os.path.join(current_dir, 'audio', 'dnd_background_music.mp3')
+                print(f"DEBUG: Trying absolute path: {music_path}")
+            
+            if os.path.exists(music_path):
+                print(f"DEBUG: File found! Loading music...")
+                pygame.mixer.music.load(music_path)
+                pygame.mixer.music.set_volume(0.7)  # Set volume to 70% (increased from 30%)
+                self.music_loaded = True
+                print(f"SUCCESS: Loaded background music from {music_path}")
+                print(f"DEBUG: Mixer frequency: {pygame.mixer.get_init()}")
+                print(f"DEBUG: Music volume set to 70%")
+            else:
+                print(f"ERROR: Background music file not found at: {music_path}")
+                print(f"       Place 'dnd_background_music.mp3' in the audio folder.")
+                self.music_loaded = False
+        except Exception as e:
+            print(f"ERROR: Exception while loading background music: {e}")
+            import traceback
+            traceback.print_exc()
+            self.music_loaded = False
+    
+    def load_sound_effects(self):
+        """Load all sound effects for the game"""
+        sound_files = {
+            'camera_open': 'camera_open.mp3',
+            'camera_close': 'camera_close.mp3',
+            'camera_change': 'camera_change.mp3',
+            'interact': 'interact.mp3',
+            'pickup': 'pickup.mp3',
+            'restock': 'restock.mp3',
+            'warning': 'warning.mp3',
+            'footsteps': 'footsteps.mp3',
+            'door_open': 'door_open.mp3',
+        }
+        
+        # Load multiple jumpscare sounds (jumpscare1.mp3, jumpscare2.mp3, etc.)
+        jumpscare_sounds = []
+        print("Loading jumpscare sounds...")
+        for i in range(1, 6):  # Try to load up to 5 jumpscare sounds
+            jumpscare_files = [f'jumpscare{i}.mp3', f'jumpscare_{i}.mp3']
+            loaded = False
+            for filename in jumpscare_files:
+                try:
+                    sound_path = f'audio/{filename}'
+                    if not os.path.exists(sound_path):
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        sound_path = os.path.join(current_dir, 'audio', filename)
+                    
+                    if os.path.exists(sound_path):
+                        sound = pygame.mixer.Sound(sound_path)
+                        sound.set_volume(0.5)
+                        jumpscare_sounds.append(sound)
+                        print(f"  ✓ Loaded: {filename}")
+                        loaded = True
+                        break  # Found this number, move to next
+                except Exception as e:
+                    print(f"  ✗ Error loading {filename}: {e}")
+            
+            if not loaded:
+                # If we didn't find this number, stop looking for higher numbers
+                break
+        
+        # Store jumpscare sounds as a list
+        self.jumpscare_sounds = jumpscare_sounds if jumpscare_sounds else None
+        if jumpscare_sounds:
+            print(f"  Loaded {len(jumpscare_sounds)} jumpscare sound(s)")
+        else:
+            print(f"  ✗ No jumpscare sounds found (looking for jumpscare1.mp3, jumpscare2.mp3, etc.)")
+        
+        # Load multiple egg_taken sounds (egg_taken1.mp3, egg_taken2.mp3, etc.)
+        egg_taken_sounds = []
+        print("Loading egg_taken sounds...")
+        for i in range(1, 6):  # Try to load up to 5 egg_taken sounds
+            egg_files = [f'egg_taken{i}.mp3', f'egg_taken_{i}.mp3']
+            loaded = False
+            for filename in egg_files:
+                try:
+                    sound_path = f'audio/{filename}'
+                    if not os.path.exists(sound_path):
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        sound_path = os.path.join(current_dir, 'audio', filename)
+                    
+                    if os.path.exists(sound_path):
+                        sound = pygame.mixer.Sound(sound_path)
+                        sound.set_volume(0.5)
+                        egg_taken_sounds.append(sound)
+                        print(f"  ✓ Loaded: {filename}")
+                        loaded = True
+                        break  # Found this number, move to next
+                except Exception as e:
+                    print(f"  ✗ Error loading {filename}: {e}")
+            
+            if not loaded:
+                # If we didn't find this number, stop looking for higher numbers
+                break
+        
+        # Store egg_taken sounds as a list
+        self.egg_taken_sounds = egg_taken_sounds if egg_taken_sounds else None
+        if egg_taken_sounds:
+            print(f"  Loaded {len(egg_taken_sounds)} egg_taken sound(s)")
+        else:
+            print(f"  ✗ No egg_taken sounds found (looking for egg_taken1.mp3, egg_taken2.mp3, etc.)")
+        
+        # Load multiple snack_taken sounds (snack_taken1.mp3, snack_taken2.mp3, etc.)
+        snack_taken_sounds = []
+        print("Loading snack_taken sounds...")
+        for i in range(1, 6):  # Try to load up to 5 snack_taken sounds
+            snack_files = [f'snack_taken{i}.mp3', f'snack_taken_{i}.mp3']
+            loaded = False
+            for filename in snack_files:
+                try:
+                    sound_path = f'audio/{filename}'
+                    if not os.path.exists(sound_path):
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        sound_path = os.path.join(current_dir, 'audio', filename)
+                    
+                    if os.path.exists(sound_path):
+                        sound = pygame.mixer.Sound(sound_path)
+                        sound.set_volume(0.5)
+                        snack_taken_sounds.append(sound)
+                        print(f"  ✓ Loaded: {filename}")
+                        loaded = True
+                        break  # Found this number, move to next
+                except Exception as e:
+                    print(f"  ✗ Error loading {filename}: {e}")
+            
+            if not loaded:
+                # If we didn't find this number, stop looking for higher numbers
+                break
+        
+        # Store snack_taken sounds as a list
+        self.snack_taken_sounds = snack_taken_sounds if snack_taken_sounds else None
+        if snack_taken_sounds:
+            print(f"  Loaded {len(snack_taken_sounds)} snack_taken sound(s)")
+        else:
+            print(f"  ✗ No snack_taken sounds found (looking for snack_taken1.mp3, snack_taken2.mp3, etc.)")
+        
+        print("Loading sound effects...")
+        for sound_name, filename in sound_files.items():
+            try:
+                # Try relative path first
+                sound_path = f'audio/{filename}'
+                if not os.path.exists(sound_path):
+                    # Fallback to absolute path
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    sound_path = os.path.join(current_dir, 'audio', filename)
+                
+                if os.path.exists(sound_path):
+                    sound = pygame.mixer.Sound(sound_path)
+                    sound.set_volume(0.5)  # Set to 50% volume
+                    self.sounds[sound_name] = sound
+                    print(f"  ✓ Loaded: {sound_name}")
+                else:
+                    self.sounds[sound_name] = None
+                    print(f"  ✗ Missing: {filename}")
+            except Exception as e:
+                print(f"  ✗ Error loading {sound_name}: {e}")
+                self.sounds[sound_name] = None
+        
+        if any(self.sounds.values()):
+            print(f"Sound effects loaded: {sum(1 for s in self.sounds.values() if s is not None)}/{len(sound_files)}")
+        else:
+            print("No sound effects loaded. Place .wav files in the audio folder for sound effects.")
+    
+    def play_sound(self, sound_name: str, volume: float = 1.0):
+        """Play a sound effect by name with optional volume multiplier"""
+        if sound_name in self.sounds and self.sounds[sound_name] is not None:
+            sound = self.sounds[sound_name]
+            # Temporarily adjust volume if specified
+            if volume != 1.0:
+                original_volume = sound.get_volume()
+                sound.set_volume(original_volume * volume)
+                sound.play()
+                # Reset volume after a short delay (handled by pygame)
+                sound.set_volume(original_volume)
+            else:
+                sound.play()
+    
+    def play_random_jumpscare_sound(self, volume: float = 1.5):
+        """Play a random jumpscare sound with optional volume multiplier"""
+        if self.jumpscare_sounds and len(self.jumpscare_sounds) > 0:
+            # Pick a random jumpscare sound
+            sound = random.choice(self.jumpscare_sounds)
+            original_volume = sound.get_volume()
+            sound.set_volume(original_volume * volume)
+            sound.play()
+            sound.set_volume(original_volume)
+        else:
+            print("No jumpscare sounds available to play")
+    
+    def play_random_egg_taken_sound(self, volume: float = 1.0):
+        """Play a random egg_taken sound with optional volume multiplier"""
+        if self.egg_taken_sounds and len(self.egg_taken_sounds) > 0:
+            # Pick a random egg_taken sound
+            sound = random.choice(self.egg_taken_sounds)
+            original_volume = sound.get_volume()
+            sound.set_volume(original_volume * volume)
+            sound.play()
+            sound.set_volume(original_volume)
+        else:
+            print("No egg_taken sounds available to play")
+    
+    def play_random_snack_taken_sound(self, volume: float = 1.0):
+        """Play a random snack_taken sound with optional volume multiplier"""
+        if self.snack_taken_sounds and len(self.snack_taken_sounds) > 0:
+            # Pick a random snack_taken sound
+            sound = random.choice(self.snack_taken_sounds)
+            original_volume = sound.get_volume()
+            sound.set_volume(original_volume * volume)
+            sound.play()
+            sound.set_volume(original_volume)
+        else:
+            print("No snack_taken sounds available to play")
     
     def load_hallway_background(self):
         """Load the hallway background image for camera view"""
@@ -361,12 +609,17 @@ class Game:
                     intern_count += 1
     
     def switch_state(self, new_state: GameState):
+        old_state = self.state
         self.state = new_state
         
         if new_state == GameState.CAMERA:
             self.camera_selected_room = RoomType.BREAK_ROOM
+            self.play_sound('camera_open')
         elif new_state == GameState.PLAYING:
             self.player.on_youtube = False
+            # Play camera close sound if coming from camera view
+            if old_state == GameState.CAMERA:
+                self.play_sound('camera_close')
     
     def show_message(self, message: str, duration: float = 2.0):
         self.message = message
@@ -458,9 +711,10 @@ class Game:
         # Check for door transitions
         for to_room_type, door_rect in current_room_obj.connections:
             if player_rect.colliderect(door_rect):
-                # Transition to new room (silently, no effects)
+                # Transition to new room
                 self.current_room = to_room_type
                 self.room_transition_cooldown = 0.3  # 0.3 second cooldown
+                self.play_sound('door_open', volume=0.3)  # Quiet door sound
                 break
     
     def check_enemy_collisions(self):
@@ -489,6 +743,9 @@ class Game:
                             enemy.state = "returning_to_classroom"
                             self.player.inventory["egg"] = False
                             self.show_message("Jo-nathan took your egg and went to eat it!", 3.0)
+                            
+                            # Play random egg taken sound
+                            self.play_random_egg_taken_sound(volume=1.2)
                             
                             # Particle effect
                             ex, ey = enemy.get_center()
@@ -553,6 +810,15 @@ class Game:
     def update_menu(self, dt: float):
         keys = pygame.key.get_pressed()
         if keys[pygame.K_SPACE]:
+            # Start background music when game starts
+            print(f"DEBUG: Starting game. Music loaded: {self.music_loaded}")
+            if self.music_loaded:
+                print("DEBUG: Attempting to play music...")
+                pygame.mixer.music.play(-1)  # -1 means loop indefinitely
+                print(f"DEBUG: Music playing: {pygame.mixer.music.get_busy()}")
+            else:
+                print("DEBUG: Music not loaded, skipping playback")
+            
             if self.show_tutorial:
                 self.switch_state(GameState.TUTORIAL)
             else:
@@ -561,6 +827,10 @@ class Game:
     def update_tutorial(self, dt: float):
         keys = pygame.key.get_pressed()
         if keys[pygame.K_SPACE]:
+            # Ensure music is playing when transitioning from tutorial to game
+            if self.music_loaded and not pygame.mixer.music.get_busy():
+                pygame.mixer.music.play(-1)
+            
             self.show_tutorial = False
             self.switch_state(GameState.PLAYING)
     
@@ -634,6 +904,15 @@ class Game:
                 self.player.direction = Direction.RIGHT if dx > 0 else Direction.LEFT
             elif dy != 0:
                 self.player.direction = Direction.DOWN if dy > 0 else Direction.UP
+            
+            # Play footstep sound periodically while moving
+            self.footstep_timer -= dt
+            if self.footstep_timer <= 0:
+                self.play_sound('footsteps', volume=0.2)  # Quiet footsteps
+                self.footstep_timer = self.footstep_interval
+        else:
+            # Reset footstep timer when not moving
+            self.footstep_timer = 0
         
         # Check door transitions
         self.check_door_transitions()
@@ -708,6 +987,13 @@ class Game:
             self.show_message("Bandwidth depleted!", 3.0)
             return
         
+        # Warning sound when bandwidth is low (below 20%)
+        if self.bandwidth < 20 and not self.low_bandwidth_warning_played:
+            self.play_sound('warning')
+            self.low_bandwidth_warning_played = True
+        elif self.bandwidth >= 20:
+            self.low_bandwidth_warning_played = False
+        
         # Update hallway background panning when viewing hallway
         if self.camera_selected_room == RoomType.HALLWAY and self.hallway_bg_image:
             self.hallway_bg_offset += 5 * dt  # Very slow panning speed
@@ -743,6 +1029,8 @@ class Game:
         # Switch between camera views (skip Meeting Room - that's where the player is)
         keys = pygame.key.get_pressed()
         
+        previous_room = self.camera_selected_room
+        
         if keys[pygame.K_1]:
             self.camera_selected_room = RoomType.BREAK_ROOM
         elif keys[pygame.K_2]:
@@ -752,6 +1040,10 @@ class Game:
         elif keys[pygame.K_4]:
             self.camera_selected_room = RoomType.CLASSROOM
         
+        # Play camera switch sound if room changed
+        if previous_room != self.camera_selected_room:
+            self.play_sound('camera_change')
+        
         # Note: Camera close is now handled in handle_events() via KEYDOWN
     
     def update_game_over(self, dt: float):
@@ -760,6 +1052,9 @@ class Game:
             self.jumpscare_timer += dt
             if self.jumpscare_timer >= self.jumpscare_duration:
                 self.jumpscare_active = False
+                # Stop music on game over
+                if self.music_loaded:
+                    pygame.mixer.music.stop()
             return
         
         keys = pygame.key.get_pressed()
@@ -770,6 +1065,9 @@ class Game:
             self.killer_enemy = None
             self.jumpscare_image = None
             self._init_game()
+            # Restart music
+            if self.music_loaded:
+                pygame.mixer.music.play(-1)
             self.switch_state(GameState.PLAYING)
     
     def trigger_jumpscare(self, enemy):
@@ -798,7 +1096,8 @@ class Game:
                 image_path = os.path.join(current_dir, 'images', image_file)
                 self.jumpscare_image = pygame.image.load(image_path).convert_alpha()
         
-        # Play jumpscare sound effect (screen shake)
+        # Play random jumpscare sound effect and screen shake
+        self.play_random_jumpscare_sound(volume=1.5)  # Play at 150% volume for impact
         self.screen_shake(30)
     
     def update_victory(self, dt: float):
@@ -809,6 +1108,9 @@ class Game:
             self.current_time = 9.0
             self.bandwidth = self.max_bandwidth
             self._init_game()
+            # Stop music on return to menu
+            if self.music_loaded:
+                pygame.mixer.music.stop()
             self.switch_state(GameState.MENU)
     
     def get_camera_offset(self) -> Tuple[int, int]:
@@ -1403,6 +1705,11 @@ class Game:
                             msg = interactable.interact(self.player, self)
                             if msg:
                                 self.show_message(msg, 2.0)
+                                # Play generic interact sound if not already played by specific interaction
+                                if interactable.type not in [InteractableType.CAMERA, 
+                                                             InteractableType.CABINET, 
+                                                             InteractableType.REFRIGERATOR]:
+                                    self.play_sound('interact')
                             break  # Only interact with one object at a time
     
     async def run(self):

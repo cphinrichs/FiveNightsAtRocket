@@ -81,6 +81,7 @@ class Interactable:
             if not has_egg or has_egg == False:
                 player.inventory["egg"] = True
                 self.cooldown = 0.5  # Short cooldown for refrigerator
+                game.play_sound('pickup')
                 return "Got an egg!"
             else:
                 return "Already have an egg"
@@ -90,10 +91,12 @@ class Interactable:
         
         if self.type == InteractableType.CABINET:
             player.inventory["snacks"] = min(5, player.inventory["snacks"] + 1)
+            game.play_sound('restock')
             return f"Refilled snacks! ({player.inventory['snacks']}/5)"
         
         elif self.type == InteractableType.CAMERA:
             game.switch_state(GameState.CAMERA)
+            # Camera sound is played in switch_state
             return "Opening cameras..."
         
         # Laptop and Desk are handled elsewhere (Y/C keys for laptop, desks are non-interactable)
