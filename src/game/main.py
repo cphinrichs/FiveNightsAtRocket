@@ -96,6 +96,13 @@ class Game:
         # Angellica's timer for coding requirement
         self.last_coding_time = 0.0
         
+        # Jumpscare system
+        self.jumpscare_active = False
+        self.jumpscare_timer = 0.0
+        self.jumpscare_duration = 1.5  # Duration in seconds
+        self.killer_enemy = None  # Track which enemy killed the player
+        self.jumpscare_image = None
+        
         self._init_game()
     
     def load_hallway_background(self):
@@ -488,24 +495,24 @@ class Game:
                             self.particle_system.emit(ex, ey, GREEN, 20, 100, 1.0)
                         else:
                             # No egg = player dies
+                            self.trigger_jumpscare(enemy)
                             self.switch_state(GameState.GAME_OVER)
-                            self.screen_shake(20)
                             px, py = self.player.get_center()
                             self.particle_system.emit(px, py, RED, 30, 150, 2.0)
                 
                 # Jeromathy only kills when angry
                 elif isinstance(enemy, Jeromathy):
                     if enemy.is_angry and enemy.state == "chasing":
+                        self.trigger_jumpscare(enemy)
                         self.switch_state(GameState.GAME_OVER)
-                        self.screen_shake(20)
                         px, py = self.player.get_center()
                         self.particle_system.emit(px, py, RED, 30, 150, 2.0)
                 
                 # Angellica kills when chasing (player on YouTube OR not coding for 15+ seconds)
                 elif isinstance(enemy, Angellica):
                     if enemy.state == "chasing":
+                        self.trigger_jumpscare(enemy)
                         self.switch_state(GameState.GAME_OVER)
-                        self.screen_shake(20)
                         px, py = self.player.get_center()
                         self.particle_system.emit(px, py, RED, 30, 150, 2.0)
     
@@ -748,13 +755,51 @@ class Game:
         # Note: Camera close is now handled in handle_events() via KEYDOWN
     
     def update_game_over(self, dt: float):
+        # Handle jumpscare first
+        if self.jumpscare_active:
+            self.jumpscare_timer += dt
+            if self.jumpscare_timer >= self.jumpscare_duration:
+                self.jumpscare_active = False
+            return
+        
         keys = pygame.key.get_pressed()
         if keys[pygame.K_SPACE]:
             # Restart day
             self.current_time = 9.0
             self.bandwidth = self.max_bandwidth
+            self.killer_enemy = None
+            self.jumpscare_image = None
             self._init_game()
             self.switch_state(GameState.PLAYING)
+    
+    def trigger_jumpscare(self, enemy):
+        """Trigger a jumpscare with the given enemy's image"""
+        self.killer_enemy = enemy
+        self.jumpscare_active = True
+        self.jumpscare_timer = 0.0
+        
+        # Map enemy names to image files
+        image_map = {
+            "Jo-nathan": "Jo-nathan.png",
+            "Jeromathy": "Jeromathy.png",
+            "Angellica": "Angellica.png",
+            "NextGen Intern": f"NextGen_intern_{getattr(enemy, 'intern_id', 1)}.png"
+        }
+        
+        image_file = image_map.get(enemy.name, None)
+        if image_file:
+            try:
+                # Try relative path first (pygbag)
+                self.jumpscare_image = pygame.image.load(f'images/{image_file}').convert_alpha()
+            except:
+                # Fallback to absolute path (desktop)
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                image_path = os.path.join(current_dir, 'images', image_file)
+                self.jumpscare_image = pygame.image.load(image_path).convert_alpha()
+        
+        # Play jumpscare sound effect (screen shake)
+        self.screen_shake(30)
     
     def update_victory(self, dt: float):
         keys = pygame.key.get_pressed()
@@ -1231,6 +1276,44 @@ class Game:
         self.screen.blit(resume_surf, resume_rect)
     
     def draw_game_over(self):
+        # Show jumpscare if active
+        if self.jumpscare_active and self.jumpscare_image:
+            # Black background
+            self.screen.fill(BLACK)
+            
+            # Scale the enemy image to fill most of the screen
+            image_rect = self.jumpscare_image.get_rect()
+            scale_factor = max(SCREEN_WIDTH / image_rect.width, SCREEN_HEIGHT / image_rect.height) * 1.2
+            scaled_width = int(image_rect.width * scale_factor)
+            scaled_height = int(image_rect.height * scale_factor)
+            jumpscare_scaled = pygame.transform.scale(self.jumpscare_image, (scaled_width, scaled_height))
+            
+            # Center the image with slight random offset for shake effect
+            import random
+            shake_x = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
+            shake_y = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
+            x = (SCREEN_WIDTH - scaled_width) // 2 + shake_x
+            y = (SCREEN_HEIGHT - scaled_height) // 2 + shake_y
+            self.screen.blit(jumpscare_scaled, (x, y))
+            
+            # Red flash effect at the beginning
+            if self.jumpscare_timer < 0.2:
+                flash_alpha = int(255 * (1.0 - self.jumpscare_timer / 0.2))
+                flash = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+                flash.fill((255, 0, 0, flash_alpha))
+                self.screen.blit(flash, (0, 0))
+            
+            # Fade to black at the end
+            if self.jumpscare_timer > self.jumpscare_duration - 0.5:
+                fade_progress = (self.jumpscare_timer - (self.jumpscare_duration - 0.5)) / 0.5
+                fade_alpha = int(255 * fade_progress)
+                fade = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+                fade.fill((0, 0, 0, fade_alpha))
+                self.screen.blit(fade, (0, 0))
+            
+            return
+        
+        # Standard game over screen (after jumpscare)
         # Red overlay
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         overlay.fill((139, 0, 0, 200))
@@ -1242,9 +1325,12 @@ class Game:
         text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
         self.screen.blit(text_surf, text_rect)
         
-        # Reason
+        # Reason with killer name
         reason_font = pygame.font.Font(None, 40)
-        reason_text = "You didn't survive your shift"
+        if self.killer_enemy:
+            reason_text = f"You were caught by {self.killer_enemy.name}!"
+        else:
+            reason_text = "You didn't survive your shift"
         reason_surf = reason_font.render(reason_text, True, LIGHT_GRAY)
         reason_rect = reason_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30))
         self.screen.blit(reason_surf, reason_rect)
