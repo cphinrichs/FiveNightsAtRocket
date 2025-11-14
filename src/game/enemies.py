@@ -389,9 +389,10 @@ class Angellica(Enemy):
         super().__init__(x, y, 38, 38, (200, 100, 200), "Angellica")
         self.speed = 70
         self.desk_pos = (x, y)
-        self.at_desk_timer = 0
         self.check_timer = 0
         self.activation_delay = 10.0
+        self.checking_meeting_room = False
+        self.meeting_room_check_complete = False
         
     def update(self, dt: float, player, rooms: Dict, game_state):
         """
@@ -415,21 +416,27 @@ class Angellica(Enemy):
         # Save old position
         old_x, old_y = self.x, self.y
         
+        # Import here to avoid circular import
+        from enums import GameState, RoomType
+        
         # Increment check timer
         self.check_timer += dt
         
         # Check meeting room every 30 seconds
-        if self.check_timer >= 30.0:
+        if self.check_timer >= 30.0 and not self.checking_meeting_room:
+            self.checking_meeting_room = True
             self.check_timer = 0
             
-            # Import here to avoid circular import
-            from enums import GameState, RoomType
-            
-            # Attack if player is on camera, slacking, or not in meeting room
+            # Attack if player is on solitaire, on camera, slacking, or not working
             player_in_meeting_room = hasattr(player, 'current_room') and player.current_room == RoomType.MEETING_ROOM
+            player_on_solitaire = hasattr(player, 'on_solitaire') and player.on_solitaire
             
-            if game_state == GameState.CAMERA or game_state == GameState.SLACKING or not player_in_meeting_room:
+            if player_on_solitaire or game_state == GameState.CAMERA or game_state == GameState.SLACKING or game_state != GameState.WORKING:
                 self.state = "chasing"
+            else:
+                # Player is working in meeting room, go back to desk
+                self.meeting_room_check_complete = True
+                self.checking_meeting_room = False
             
         # Chase player if state is chasing
         if self.state == "chasing":
@@ -452,7 +459,7 @@ class Angellica(Enemy):
                 else:
                     self.direction = Direction.DOWN if dy > 0 else Direction.UP
         else:
-            # Idle at desk
+            # Return to desk
             self.state = "idle"
             dx_to_desk = self.desk_pos[0] - self.x
             dy_to_desk = self.desk_pos[1] - self.y
@@ -468,6 +475,10 @@ class Angellica(Enemy):
                     self.direction = Direction.RIGHT if dx_to_desk > 0 else Direction.LEFT
                 else:
                     self.direction = Direction.DOWN if dy_to_desk > 0 else Direction.UP
+            else:
+                # Reached desk, complete the check
+                if self.checking_meeting_room:
+                    self.checking_meeting_room = False
         
         return old_x, old_y
 

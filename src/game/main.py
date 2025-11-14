@@ -911,8 +911,9 @@ class Game:
         if not self.player:
             return
         
-        # Update time
-        time_multiplier = 3.0 if self.player.on_solitaire else 1.0
+        # Update time - frozen in free roam mode
+        # Time multiplier: 3x if playing Solitaire, 0x if in free roam (PLAYING state), 1x otherwise
+        time_multiplier = 3.0 if self.player.on_solitaire else 0.0
         self.current_time += (dt / 60.0) * self.time_speed * time_multiplier
         
         # Check victory condition
@@ -1269,7 +1270,7 @@ class Game:
     
     def update_slacking(self, dt: float):
         """Update slacking mode - enemies still move, time still passes"""
-        # Time still progresses
+        # Time progresses at normal speed
         self.current_time += (dt / 60.0) * self.time_speed
         
         # Check victory condition
@@ -1299,8 +1300,7 @@ class Game:
             elif isinstance(enemy, Runnit):
                 enemy.update(dt, self.player, self.rooms)
         
-        # Check enemy collisions
-        self.check_enemy_collisions()
+        # DO NOT check enemy collisions - player is SAFE while slacking!
         
         # Note: Controls handled in handle_events via KEYDOWN
     
@@ -1323,7 +1323,7 @@ class Game:
         # Reset coding timer (player is actively coding)
         self.last_coding_time = 0.0
         
-        # Time still progresses
+        # Time progresses at normal speed
         self.current_time += (dt / 60.0) * self.time_speed
         
         # Check victory condition
@@ -1353,7 +1353,7 @@ class Game:
             elif isinstance(enemy, Runnit):
                 enemy.update(dt, self.player, self.rooms)
         
-        # DO NOT check enemy collisions - player is SAFE while working!
+        # DO NOT check enemy collisions - player is SAFE while working AND slacking!
         
         # Note: Controls handled in handle_events via KEYDOWN
     
@@ -2079,6 +2079,9 @@ class Game:
         info_surf = info_font.render(info_text, True, (255, 200, 100))
         info_rect = info_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
         self.screen.blit(info_surf, info_rect)
+        
+        # Draw enemy indicators in corner if enemies are in the same room
+        self.draw_enemy_indicators()
     
     def draw_working(self):
         """Draw the working screen"""
@@ -2161,6 +2164,106 @@ class Game:
             info_surf = info_font.render(info_text, True, (255, 200, 100))
             info_rect = info_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
             self.screen.blit(info_surf, info_rect)
+        
+        # Draw enemy indicators in corner if enemies are in the same room
+        self.draw_enemy_indicators()
+    
+    def draw_enemy_indicators(self):
+        """Draw small enemy images in corner if they're in the same room as player"""
+        if not self.player:
+            return
+        
+        # Get all enemies in the player's current room
+        enemies_in_room = []
+        for enemy in self.enemies:
+            if enemy.current_room == self.current_room:
+                enemies_in_room.append(enemy)
+        
+        if not enemies_in_room:
+            return
+        
+        # Draw enemy indicators in bottom-right corner
+        indicator_size = 120
+        indicator_spacing = 10
+        start_x = SCREEN_WIDTH - indicator_size - 20
+        start_y = SCREEN_HEIGHT - (indicator_size + indicator_spacing) * len(enemies_in_room) - 20
+        
+        for i, enemy in enumerate(enemies_in_room):
+            x = start_x
+            y = start_y + i * (indicator_size + indicator_spacing)
+            
+            # Draw semi-transparent background box
+            bg_box = pygame.Surface((indicator_size, indicator_size), pygame.SRCALPHA)
+            bg_box.fill((0, 0, 0, 180))
+            self.screen.blit(bg_box, (x, y))
+            
+            # Draw border
+            border_color = RED if enemy.state == "chasing" else YELLOW
+            pygame.draw.rect(self.screen, border_color, (x, y, indicator_size, indicator_size), 3)
+            
+            # Load and draw enemy image
+            enemy_image = None
+            image_map = {
+                "Jo-nathan": "jonathan.png",
+                "Jeromathy": "Jeromathy.png",
+                "Angellica": "angellica.png",
+                "Runnit": "runnit.png",
+                "NextGen Intern": f"NextGen_intern_{getattr(enemy, 'intern_id', 1)}.png"
+            }
+            
+            image_file = image_map.get(enemy.name)
+            if image_file:
+                try:
+                    # Try relative path first (pygbag)
+                    enemy_image = pygame.image.load(f'images/{image_file}').convert_alpha()
+                except:
+                    # Fallback to absolute path (desktop)
+                    try:
+                        import os
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        image_path = os.path.join(current_dir, 'images', image_file)
+                        enemy_image = pygame.image.load(image_path).convert_alpha()
+                    except Exception as e:
+                        # If image fails to load, just show colored box
+                        enemy_image = None
+            
+            if enemy_image:
+                # Scale image to fit in indicator box (leave some padding)
+                img_size = indicator_size - 20
+                enemy_image_scaled = pygame.transform.scale(enemy_image, (img_size, img_size))
+                self.screen.blit(enemy_image_scaled, (x + 10, y + 10))
+            else:
+                # Fallback: draw colored circle
+                pygame.draw.circle(self.screen, enemy.color, 
+                                 (x + indicator_size // 2, y + indicator_size // 2), 
+                                 indicator_size // 3)
+            
+            # Draw enemy name below indicator
+            name_font = pygame.font.Font(None, 20)
+            name_surf = name_font.render(enemy.name, True, WHITE)
+            name_rect = name_surf.get_rect(centerx=x + indicator_size // 2, y=y + indicator_size + 5)
+            
+            # Draw name background for readability
+            name_bg = pygame.Surface((name_surf.get_width() + 10, name_surf.get_height() + 4), pygame.SRCALPHA)
+            name_bg.fill((0, 0, 0, 200))
+            self.screen.blit(name_bg, (name_rect.x - 5, name_rect.y - 2))
+            self.screen.blit(name_surf, name_rect)
+            
+            # Draw state indicator
+            if enemy.state == "chasing":
+                state_font = pygame.font.Font(None, 18)
+                state_surf = state_font.render("CHASING!", True, RED)
+                state_rect = state_surf.get_rect(centerx=x + indicator_size // 2, y=y + indicator_size + 25)
+                
+                # Pulsing effect for chasing
+                import math
+                pulse = abs(math.sin(pygame.time.get_ticks() / 200.0))
+                state_alpha = int(150 + 105 * pulse)
+                
+                state_bg = pygame.Surface((state_surf.get_width() + 10, state_surf.get_height() + 4), pygame.SRCALPHA)
+                state_bg.fill((255, 0, 0, state_alpha))
+                self.screen.blit(state_bg, (state_rect.x - 5, state_rect.y - 2))
+                self.screen.blit(state_surf, state_rect)
     
     def handle_events(self):
         for event in pygame.event.get():
