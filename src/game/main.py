@@ -43,6 +43,10 @@ class Game:
         self.music_loaded = False
         self.load_background_music()
         
+        # Start music immediately since we skip menu
+        if self.music_loaded:
+            pygame.mixer.music.play(-1)  # -1 means loop indefinitely
+        
         # Sound effects
         self.sounds = {}
         self.load_sound_effects()
@@ -62,13 +66,8 @@ class Game:
         # Bandwidth
         self.bandwidth = 100
         self.max_bandwidth = 100
-        self.bandwidth_drain_rate = 2  # Per second when cameras open (reduced from 5)
-        self.bandwidth_refill_rate = 0.5  # Per second when cameras closed (1/20 of original)
-        
-        # WIFI resource (for working mode)
-        self.wifi = 100
-        self.max_wifi = 100
-        self.wifi_drain_rate = 1.5  # Per second when working
+        self.bandwidth_drain_rate = 2  # Per second when cameras open or working
+        self.bandwidth_refill_rate = 0.5  # Per second when idle
         
         # Day progression
         self.current_day = 1
@@ -604,10 +603,10 @@ class Game:
             intern3.activation_delay = 35.0  # Third intern activates at 35 seconds
             self.enemies.append(intern3)
             
-            # Runnit in Meeting Room (center)
-            meeting_room = self.rooms[RoomType.MEETING_ROOM]
-            runnit = Runnit(meeting_room.x + meeting_room.width // 2, meeting_room.y + meeting_room.height // 2)
-            runnit.current_room = RoomType.MEETING_ROOM
+            # Runnit in Classroom (top left corner)
+            classroom = self.rooms[RoomType.CLASSROOM]
+            runnit = Runnit(classroom.x + 80, classroom.y + 80)
+            runnit.current_room = RoomType.CLASSROOM
             self.enemies.append(runnit)
         else:
             # Reset enemy positions for new day
@@ -660,10 +659,10 @@ class Game:
                     enemy.returning_to_classroom = False
                     intern_count += 1
                 elif isinstance(enemy, Runnit):
-                    meeting_room = self.rooms[RoomType.MEETING_ROOM]
-                    enemy.x = meeting_room.x + meeting_room.width // 2
-                    enemy.y = meeting_room.y + meeting_room.height // 2
-                    enemy.current_room = RoomType.MEETING_ROOM
+                    classroom = self.rooms[RoomType.CLASSROOM]
+                    enemy.x = classroom.x + 80
+                    enemy.y = classroom.y + 80
+                    enemy.current_room = RoomType.CLASSROOM
                     enemy.activation_delay = 20.0
                     enemy.is_sprinting = False
                     enemy.sprint_timer = 0
@@ -1035,7 +1034,7 @@ class Game:
                 if result:
                     old_x, old_y = result
             elif isinstance(enemy, Angellica):
-                result = enemy.update(dt, self.player, self.rooms, self.last_coding_time)
+                result = enemy.update(dt, self.player, self.rooms, self.state)
                 if result:
                     old_x, old_y = result
             elif isinstance(enemy, NextGenIntern):
@@ -1131,6 +1130,26 @@ class Game:
         # Play camera switch sound if room changed
         if previous_room != self.camera_selected_room:
             self.play_sound('camera_change')
+        
+        # Update enemies while on camera (player is vulnerable!)
+        snacks_depleted = self.player.inventory["snacks"] == 0 if self.player else False
+        breakroom = self.rooms[RoomType.BREAK_ROOM]
+        breakroom_center = (breakroom.x + breakroom.width // 2, breakroom.y + breakroom.height // 2)
+        
+        for enemy in self.enemies:
+            if isinstance(enemy, Jonathan):
+                enemy.update(dt, self.player, self.rooms, self.current_room)
+            elif isinstance(enemy, Jeromathy):
+                enemy.update(dt, self.player, snacks_depleted, self.rooms)
+            elif isinstance(enemy, Angellica):
+                enemy.update(dt, self.player, self.rooms, self.state)
+            elif isinstance(enemy, NextGenIntern):
+                enemy.update(dt, self.player, breakroom_center, self, self.rooms)
+            elif isinstance(enemy, Runnit):
+                enemy.update(dt, self.player, self.rooms)
+        
+        # Check enemy collisions - player is vulnerable while on camera
+        self.check_enemy_collisions()
         
         # Note: Camera close is now handled in handle_events() via KEYDOWN
     
@@ -1274,7 +1293,7 @@ class Game:
             elif isinstance(enemy, Jeromathy):
                 enemy.update(dt, self.player, snacks_depleted, self.rooms)
             elif isinstance(enemy, Angellica):
-                enemy.update(dt, self.player, self.rooms, self.last_coding_time)
+                enemy.update(dt, self.player, self.rooms, self.state)
             elif isinstance(enemy, NextGenIntern):
                 enemy.update(dt, self.player, breakroom_center, self, self.rooms)
             elif isinstance(enemy, Runnit):
@@ -1286,18 +1305,18 @@ class Game:
         # Note: Controls handled in handle_events via KEYDOWN
     
     def update_working(self, dt: float):
-        """Update working mode - drains WIFI, enemies still move, resets coding timer"""
-        # Drain WIFI
-        self.wifi -= self.wifi_drain_rate * dt
-        if self.wifi <= 0:
-            self.wifi = 0
-            # Generate game over message for WIFI depletion
+        """Update working mode - drains bandwidth, enemies still move, resets coding timer"""
+        # Drain bandwidth
+        self.bandwidth -= self.bandwidth_drain_rate * dt
+        if self.bandwidth <= 0:
+            self.bandwidth = 0
+            # Generate game over message for bandwidth depletion
             context = {
                 'time': self._format_time(self.current_time),
-                'room': 'Laptop',
-                'cause': 'WIFI ran out',
+                'room': 'Meeting Room',
+                'cause': 'Bandwidth ran out',
             }
-            self.death_message = "Your WIFI ran out. Can't work without internet. Game Over."
+            self.death_message = "Your bandwidth ran out. Can't work without internet. Game Over."
             self.switch_state(GameState.GAME_OVER)
             return
         
@@ -1328,14 +1347,13 @@ class Game:
             elif isinstance(enemy, Jeromathy):
                 enemy.update(dt, self.player, snacks_depleted, self.rooms)
             elif isinstance(enemy, Angellica):
-                enemy.update(dt, self.player, self.rooms, self.last_coding_time)
+                enemy.update(dt, self.player, self.rooms, self.state)
             elif isinstance(enemy, NextGenIntern):
                 enemy.update(dt, self.player, breakroom_center, self, self.rooms)
             elif isinstance(enemy, Runnit):
                 enemy.update(dt, self.player, self.rooms)
         
-        # Check enemy collisions
-        self.check_enemy_collisions()
+        # DO NOT check enemy collisions - player is SAFE while working!
         
         # Note: Controls handled in handle_events via KEYDOWN
     
@@ -2029,24 +2047,24 @@ class Game:
         time_rect = time_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
         self.screen.blit(time_surf, time_rect)
         
-        # WIFI meter
-        wifi_font = pygame.font.Font(None, 40)
-        wifi_percent = int((self.wifi / self.max_wifi) * 100)
-        wifi_text = f"WIFI: {wifi_percent}%"
-        wifi_color = GREEN if wifi_percent > 50 else YELLOW if wifi_percent > 25 else RED
-        wifi_surf = wifi_font.render(wifi_text, True, wifi_color)
-        wifi_rect = wifi_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
-        self.screen.blit(wifi_surf, wifi_rect)
+        # Bandwidth meter
+        bandwidth_font = pygame.font.Font(None, 40)
+        bandwidth_percent = int((self.bandwidth / self.max_bandwidth) * 100)
+        bandwidth_text = f"Bandwidth: {bandwidth_percent}%"
+        bandwidth_color = GREEN if bandwidth_percent > 50 else YELLOW if bandwidth_percent > 25 else RED
+        bandwidth_surf = bandwidth_font.render(bandwidth_text, True, bandwidth_color)
+        bandwidth_rect = bandwidth_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        self.screen.blit(bandwidth_surf, bandwidth_rect)
         
-        # WIFI bar
+        # Bandwidth bar
         bar_width = 400
         bar_height = 30
         bar_x = SCREEN_WIDTH // 2 - bar_width // 2
         bar_y = 290
         pygame.draw.rect(self.screen, GRAY, (bar_x, bar_y, bar_width, bar_height), 2)
-        fill_width = int((self.wifi / self.max_wifi) * bar_width)
+        fill_width = int((self.bandwidth / self.max_bandwidth) * bar_width)
         if fill_width > 0:
-            pygame.draw.rect(self.screen, wifi_color, (bar_x, bar_y, fill_width, bar_height))
+            pygame.draw.rect(self.screen, bandwidth_color, (bar_x, bar_y, fill_width, bar_height))
         
         # Controls hint
         controls_font = pygame.font.Font(None, 36)
@@ -2093,28 +2111,28 @@ class Game:
         time_rect = time_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
         self.screen.blit(time_surf, time_rect)
         
-        # WIFI meter with warning colors
-        wifi_font = pygame.font.Font(None, 40)
-        wifi_percent = int((self.wifi / self.max_wifi) * 100)
-        wifi_text = f"WIFI: {wifi_percent}%"
-        wifi_color = GREEN if wifi_percent > 50 else YELLOW if wifi_percent > 25 else RED
-        wifi_surf = wifi_font.render(wifi_text, True, wifi_color)
-        wifi_rect = wifi_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
-        self.screen.blit(wifi_surf, wifi_rect)
+        # Bandwidth meter with warning colors
+        bandwidth_font = pygame.font.Font(None, 40)
+        bandwidth_percent = int((self.bandwidth / self.max_bandwidth) * 100)
+        bandwidth_text = f"Bandwidth: {bandwidth_percent}%"
+        bandwidth_color = GREEN if bandwidth_percent > 50 else YELLOW if bandwidth_percent > 25 else RED
+        bandwidth_surf = bandwidth_font.render(bandwidth_text, True, bandwidth_color)
+        bandwidth_rect = bandwidth_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        self.screen.blit(bandwidth_surf, bandwidth_rect)
         
-        # WIFI bar
+        # Bandwidth bar
         bar_width = 400
         bar_height = 30
         bar_x = SCREEN_WIDTH // 2 - bar_width // 2
         bar_y = 290
         pygame.draw.rect(self.screen, GRAY, (bar_x, bar_y, bar_width, bar_height), 2)
-        fill_width = int((self.wifi / self.max_wifi) * bar_width)
+        fill_width = int((self.bandwidth / self.max_bandwidth) * bar_width)
         if fill_width > 0:
-            pygame.draw.rect(self.screen, wifi_color, (bar_x, bar_y, fill_width, bar_height))
+            pygame.draw.rect(self.screen, bandwidth_color, (bar_x, bar_y, fill_width, bar_height))
         
-        # WIFI drain rate indicator
+        # Bandwidth drain rate indicator
         drain_font = pygame.font.Font(None, 32)
-        drain_text = f"Draining at {self.wifi_drain_rate:.1f}/sec"
+        drain_text = f"Draining at {self.bandwidth_drain_rate:.1f}/sec"
         drain_surf = drain_font.render(drain_text, True, RED)
         drain_rect = drain_surf.get_rect(center=(SCREEN_WIDTH // 2, 340))
         self.screen.blit(drain_surf, drain_rect)
@@ -2130,16 +2148,16 @@ class Game:
         controls_rect = controls_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
         self.screen.blit(controls_surf, controls_rect)
         
-        # Warning text if WIFI is low
-        if wifi_percent <= 25:
+        # Warning text if bandwidth is low
+        if bandwidth_percent <= 25:
             warning_font = pygame.font.Font(None, 36)
-            warning_text = "WARNING: WIFI CRITICAL!"
+            warning_text = "WARNING: BANDWIDTH CRITICAL!"
             warning_surf = warning_font.render(warning_text, True, RED)
             warning_rect = warning_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 150))
             self.screen.blit(warning_surf, warning_rect)
         else:
             info_font = pygame.font.Font(None, 28)
-            info_text = "Keep working... but watch your WIFI!"
+            info_text = "Keep working... but watch your bandwidth!"
             info_surf = info_font.render(info_text, True, (255, 200, 100))
             info_rect = info_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
             self.screen.blit(info_surf, info_rect)

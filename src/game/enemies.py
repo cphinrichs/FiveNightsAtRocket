@@ -43,7 +43,7 @@ def simple_pathfind(enemy_pos: Tuple[float, float], target_pos: Tuple[float, flo
     dy /= dist
     
     # Check if direct path is clear (sample points along the path)
-    steps = int(dist / 20)  # Check every 20 pixels
+    steps = max(1, int(dist / 30))  # Check every 30 pixels, at least 1 check
     direct_clear = True
     
     if steps > 0:
@@ -82,8 +82,8 @@ def simple_pathfind(enemy_pos: Tuple[float, float], target_pos: Tuple[float, flo
     
     for alt_dx, alt_dy in alternatives:
         # Check if this direction is blocked
-        test_x = ex + alt_dx * 25
-        test_y = ey + alt_dy * 25
+        test_x = ex + alt_dx * 30
+        test_y = ey + alt_dy * 30
         test_rect = pygame.Rect(test_x - 15, test_y - 15, 30, 30)
         
         blocked = False
@@ -257,9 +257,14 @@ class Jonathan(Enemy):
         # Get current room info for pathfinding
         current_room_obj = rooms.get(self.current_room)
         if current_room_obj:
+            # Collect all walls from all rooms for better cross-room pathfinding
+            all_walls = []
+            for room in rooms.values():
+                all_walls.extend(room.walls)
+            
             # Use pathfinding to navigate around walls
             dx, dy = simple_pathfind((ex, ey), (px, py), 
-                                    current_room_obj.walls, 
+                                    all_walls, 
                                     current_room_obj.get_rect())
             
             self.x += dx * self.speed * dt
@@ -376,20 +381,19 @@ class Jeromathy(Enemy):
 
 class Angellica(Enemy):
     """
-    Angellica: Gets angry when the player plays Solitaire.
+    Angellica: Checks meeting room every 30 seconds. Attacks if player is not working.
     """
     
     def __init__(self, x: float, y: float):
         """Initialize Angellica at her desk position."""
         super().__init__(x, y, 38, 38, (200, 100, 200), "Angellica")
-        self.speed = 70  # Reduced from 100
-        self.watching_solitaire = False
+        self.speed = 70
         self.desk_pos = (x, y)
         self.at_desk_timer = 0
-        self.patrol_timer = 0
-        self.activation_delay = 10.0  # Wait 10 seconds before becoming active
+        self.check_timer = 0
+        self.activation_delay = 10.0
         
-    def update(self, dt: float, player, rooms: Dict, last_coding_time: float):
+    def update(self, dt: float, player, rooms: Dict, game_state):
         """
         Update Angellica's AI.
         
@@ -397,24 +401,38 @@ class Angellica(Enemy):
             dt: Delta time (seconds)
             player: Player object
             rooms: Dictionary of room objects
-            last_coding_time: Time since player last coded
+            game_state: Current game state
             
         Returns:
             Tuple of old (x, y) position for collision detection
         """
-        # Activation delay - Angellica stays at desk initially
+        # Activation delay
         if self.activation_delay > 0:
             self.activation_delay -= dt
             self.state = "idle"
-            return None, None  # Return tuple for consistency
+            return None, None
         
         # Save old position
         old_x, old_y = self.x, self.y
         
-        # Chase player if playing Solitaire OR hasn't coded in 30+ seconds
-        if player.on_solitaire or last_coding_time > 30.0:
-            # Chase player across any room (removed same-room restriction)
-            self.state = "chasing"
+        # Increment check timer
+        self.check_timer += dt
+        
+        # Check meeting room every 30 seconds
+        if self.check_timer >= 30.0:
+            self.check_timer = 0
+            
+            # Import here to avoid circular import
+            from enums import GameState, RoomType
+            
+            # Attack if player is on camera, slacking, or not in meeting room
+            player_in_meeting_room = hasattr(player, 'current_room') and player.current_room == RoomType.MEETING_ROOM
+            
+            if game_state == GameState.CAMERA or game_state == GameState.SLACKING or not player_in_meeting_room:
+                self.state = "chasing"
+            
+        # Chase player if state is chasing
+        if self.state == "chasing":
             px, py = player.get_center()
             ex, ey = self.get_center()
             
@@ -434,34 +452,22 @@ class Angellica(Enemy):
                 else:
                     self.direction = Direction.DOWN if dy > 0 else Direction.UP
         else:
-            # Patrol between desk and other locations
-            self.patrol_timer += dt
+            # Idle at desk
+            self.state = "idle"
+            dx_to_desk = self.desk_pos[0] - self.x
+            dy_to_desk = self.desk_pos[1] - self.y
+            dist_to_desk = math.sqrt(dx_to_desk * dx_to_desk + dy_to_desk * dy_to_desk)
             
-            # Spend time at desk
-            if self.at_desk_timer > 0:
-                self.at_desk_timer -= dt
-                self.state = "at_desk"
+            if dist_to_desk > 5:
+                dx_to_desk /= dist_to_desk
+                dy_to_desk /= dist_to_desk
+                self.x += dx_to_desk * self.speed * 0.5 * dt
+                self.y += dy_to_desk * self.speed * 0.5 * dt
                 
-                # Move toward desk
-                dx_to_desk = self.desk_pos[0] - self.x
-                dy_to_desk = self.desk_pos[1] - self.y
-                dist_to_desk = math.sqrt(dx_to_desk * dx_to_desk + dy_to_desk * dy_to_desk)
-                
-                if dist_to_desk > 5:
-                    dx_to_desk /= dist_to_desk
-                    dy_to_desk /= dist_to_desk
-                    self.x += dx_to_desk * self.speed * 0.5 * dt  # Slower when returning
-                    self.y += dy_to_desk * self.speed * 0.5 * dt
-                    
-                    if abs(dx_to_desk) > abs(dy_to_desk):
-                        self.direction = Direction.RIGHT if dx_to_desk > 0 else Direction.LEFT
-                    else:
-                        self.direction = Direction.DOWN if dy_to_desk > 0 else Direction.UP
-            elif self.patrol_timer > 15.0:  # Return to desk every 15 seconds
-                self.at_desk_timer = 8.0  # Stay at desk for 8 seconds
-                self.patrol_timer = 0
-            else:
-                self.state = "idle"
+                if abs(dx_to_desk) > abs(dy_to_desk):
+                    self.direction = Direction.RIGHT if dx_to_desk > 0 else Direction.LEFT
+                else:
+                    self.direction = Direction.DOWN if dy_to_desk > 0 else Direction.UP
         
         return old_x, old_y
 
