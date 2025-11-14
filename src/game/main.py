@@ -35,7 +35,7 @@ class Game:
         pygame.display.set_caption("Nine to Five at Rocket")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.state = GameState.MENU
+        self.state = GameState.SLACKING  # Start in SLACKING mode
         
         # Game time
         self.current_time = 9.0  # 9:00 AM
@@ -47,6 +47,11 @@ class Game:
         self.max_bandwidth = 100
         self.bandwidth_drain_rate = 2  # Per second when cameras open (reduced from 5)
         self.bandwidth_refill_rate = 0.5  # Per second when cameras closed (1/20 of original)
+        
+        # WIFI resource (for working mode)
+        self.wifi = 100
+        self.max_wifi = 100
+        self.wifi_drain_rate = 1.5  # Per second when working
         
         # Day progression
         self.current_day = 1
@@ -87,6 +92,11 @@ class Game:
         self.classroom_bg_image = None
         self.classroom_bg_offset = 0.0
         self.load_classroom_background()
+        
+        # Slacking and Working mode backgrounds
+        self.slacking_bg_image = None
+        self.working_bg_image = None
+        self.load_mode_backgrounds()
         
         # Tutorial
         self.show_tutorial = True
@@ -186,6 +196,40 @@ class Game:
             print(f"Error loading classroom background: {e}")
             self.classroom_bg_image = None
     
+    def load_mode_backgrounds(self):
+        """Load the slacking and working mode background images"""
+        try:
+            # Try relative path first (works in pygbag)
+            self.slacking_bg_image = pygame.image.load('images/slacking.jpg').convert()
+            print(f"Loaded slacking background from images/slacking.jpg")
+        except:
+            # Fallback to absolute path (works in desktop)
+            try:
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                image_path = os.path.join(current_dir, 'images', 'slacking.jpg')
+                self.slacking_bg_image = pygame.image.load(image_path).convert()
+                print(f"Loaded slacking background from {image_path}")
+            except Exception as e:
+                print(f"Error loading slacking background: {e}")
+                self.slacking_bg_image = None
+        
+        try:
+            # Try relative path first (works in pygbag)
+            self.working_bg_image = pygame.image.load('images/working.jpg').convert()
+            print(f"Loaded working background from images/working.jpg")
+        except:
+            # Fallback to absolute path (works in desktop)
+            try:
+                import os
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                image_path = os.path.join(current_dir, 'images', 'working.jpg')
+                self.working_bg_image = pygame.image.load(image_path).convert()
+                print(f"Loaded working background from {image_path}")
+            except Exception as e:
+                print(f"Error loading working background: {e}")
+                self.working_bg_image = None
+    
     def _init_game(self):
         """Initialize game objects"""
         # Create rooms with proper layout
@@ -263,14 +307,14 @@ class Game:
         # Meeting Room connections
         self.rooms[RoomType.MEETING_ROOM].add_door(RoomType.HALLWAY, door_hall_meeting)
         
-        # Create player in classroom near the laptop
-        classroom = self.rooms[RoomType.CLASSROOM]
+        # Create player in office (camera room) near the laptop
+        office = self.rooms[RoomType.OFFICE]
         # Laptop is at x + width/2 - 30, y + height/2 - 20
         # Position player slightly to the right of the laptop
-        laptop_x = classroom.x + classroom.width // 2 - 30
-        laptop_y = classroom.y + classroom.height // 2 - 20
+        laptop_x = office.x + office.width // 2 - 30
+        laptop_y = office.y + office.height // 2 - 20
         self.player = Player(laptop_x + 100, laptop_y + 20)
-        self.current_room = RoomType.CLASSROOM
+        self.current_room = RoomType.OFFICE
         
         # Create enemies - ONE OF EACH
         # Only create if not already in the list (prevents duplicates on day reset)
@@ -387,7 +431,7 @@ class Game:
         if new_state == GameState.CAMERA:
             self.camera_selected_room = RoomType.BREAK_ROOM
         elif new_state == GameState.PLAYING:
-            self.player.on_youtube = False
+            self.player.on_solitaire = False
     
     def show_message(self, message: str, duration: float = 2.0):
         self.message = message
@@ -529,7 +573,7 @@ class Game:
                         px, py = self.player.get_center()
                         self.particle_system.emit(px, py, RED, 30, 150, 2.0)
                 
-                # Angellica kills when chasing (player on YouTube OR not coding for 15+ seconds)
+                # Angellica kills when chasing (player on Solitaire OR not coding for 15+ seconds)
                 elif isinstance(enemy, Angellica):
                     if enemy.state == "chasing":
                         self.trigger_jumpscare(enemy)
@@ -558,6 +602,10 @@ class Game:
             self.update_victory(dt)
         elif self.state == GameState.TUTORIAL:
             self.update_tutorial(dt)
+        elif self.state == GameState.SLACKING:
+            self.update_slacking(dt)
+        elif self.state == GameState.WORKING:
+            self.update_working(dt)
         
         # Update particles
         self.particle_system.update(dt)
@@ -598,7 +646,7 @@ class Game:
             return
         
         # Update time
-        time_multiplier = 3.0 if self.player.on_youtube else 1.0
+        time_multiplier = 3.0 if self.player.on_solitaire else 1.0
         self.current_time += (dt / 60.0) * self.time_speed * time_multiplier
         
         # Check victory condition
@@ -679,10 +727,10 @@ class Game:
             if interactable.type == InteractableType.LAPTOP:
                 if interactable.can_interact(self.player):
                     if keys[pygame.K_y]:
-                        self.player.on_youtube = True
-                        self.show_message("Watching YouTube... (Time moves faster!)", 2.0)
+                        self.player.on_solitaire = True
+                        self.show_message("Playing Solitaire... (Time moves faster!)", 2.0)
                     elif keys[pygame.K_c]:
-                        self.player.on_youtube = False
+                        self.player.on_solitaire = False
                         self.last_coding_time = 0.0  # Reset timer when coding
                         self.show_message("Working on coding project", 2.0)
         
@@ -880,8 +928,8 @@ class Game:
             else:
                 return "angering Jeromathy"
         elif isinstance(enemy, Angellica):
-            if self.player and self.player.on_youtube:
-                return "watching YouTube on the job"
+            if self.player and self.player.on_solitaire:
+                return "playing Solitaire on the job"
             else:
                 return "not coding for too long"
         else:
@@ -896,6 +944,97 @@ class Game:
             self.bandwidth = self.max_bandwidth
             self._init_game()
             self.switch_state(GameState.MENU)
+    
+    def update_slacking(self, dt: float):
+        """Update slacking mode - enemies still move, time still passes"""
+        # Time still progresses
+        self.current_time += (dt / 60.0) * self.time_speed
+        
+        # Check victory condition
+        if self.current_time >= self.target_time:
+            victory_context = {
+                'time_survived': '9am to 5pm',
+                'enemies_avoided': 'Jo-nathan, Jeromathy, Angellica, Runnit',
+            }
+            self.death_message = self.ai_generator.generate_victory_message(victory_context)
+            self.switch_state(GameState.VICTORY)
+            return
+        
+        # Update enemies in background
+        snacks_depleted = self.player.inventory["snacks"] == 0 if self.player else False
+        breakroom = self.rooms[RoomType.BREAK_ROOM]
+        breakroom_center = (breakroom.x + breakroom.width // 2, breakroom.y + breakroom.height // 2)
+        
+        for enemy in self.enemies:
+            if isinstance(enemy, Jonathan):
+                enemy.update(dt, self.player, self.rooms, self.current_room)
+            elif isinstance(enemy, Jeromathy):
+                enemy.update(dt, self.player, snacks_depleted, self.rooms)
+            elif isinstance(enemy, Angellica):
+                enemy.update(dt, self.player, self.rooms, self.last_coding_time)
+            elif isinstance(enemy, NextGenIntern):
+                enemy.update(dt, self.player, breakroom_center, self, self.rooms)
+            elif isinstance(enemy, Runnit):
+                enemy.update(dt, self.player, self.rooms)
+        
+        # Check enemy collisions
+        self.check_enemy_collisions()
+        
+        # Note: Controls handled in handle_events via KEYDOWN
+    
+    def update_working(self, dt: float):
+        """Update working mode - drains WIFI, enemies still move, resets coding timer"""
+        # Drain WIFI
+        self.wifi -= self.wifi_drain_rate * dt
+        if self.wifi <= 0:
+            self.wifi = 0
+            # Generate game over message for WIFI depletion
+            context = {
+                'time': self._format_time(self.current_time),
+                'room': 'Laptop',
+                'cause': 'WIFI ran out',
+            }
+            self.death_message = "Your WIFI ran out. Can't work without internet. Game Over."
+            self.switch_state(GameState.GAME_OVER)
+            return
+        
+        # Reset coding timer (player is actively coding)
+        self.last_coding_time = 0.0
+        
+        # Time still progresses
+        self.current_time += (dt / 60.0) * self.time_speed
+        
+        # Check victory condition
+        if self.current_time >= self.target_time:
+            victory_context = {
+                'time_survived': '9am to 5pm',
+                'enemies_avoided': 'Jo-nathan, Jeromathy, Angellica, Runnit',
+            }
+            self.death_message = self.ai_generator.generate_victory_message(victory_context)
+            self.switch_state(GameState.VICTORY)
+            return
+        
+        # Update enemies in background
+        snacks_depleted = self.player.inventory["snacks"] == 0 if self.player else False
+        breakroom = self.rooms[RoomType.BREAK_ROOM]
+        breakroom_center = (breakroom.x + breakroom.width // 2, breakroom.y + breakroom.height // 2)
+        
+        for enemy in self.enemies:
+            if isinstance(enemy, Jonathan):
+                enemy.update(dt, self.player, self.rooms, self.current_room)
+            elif isinstance(enemy, Jeromathy):
+                enemy.update(dt, self.player, snacks_depleted, self.rooms)
+            elif isinstance(enemy, Angellica):
+                enemy.update(dt, self.player, self.rooms, self.last_coding_time)
+            elif isinstance(enemy, NextGenIntern):
+                enemy.update(dt, self.player, breakroom_center, self, self.rooms)
+            elif isinstance(enemy, Runnit):
+                enemy.update(dt, self.player, self.rooms)
+        
+        # Check enemy collisions
+        self.check_enemy_collisions()
+        
+        # Note: Controls handled in handle_events via KEYDOWN
     
     def get_camera_offset(self) -> Tuple[int, int]:
         """Calculate camera offset to center on player"""
@@ -930,6 +1069,10 @@ class Game:
             self.draw_victory()
         elif self.state == GameState.TUTORIAL:
             self.draw_tutorial()
+        elif self.state == GameState.SLACKING:
+            self.draw_slacking()
+        elif self.state == GameState.WORKING:
+            self.draw_working()
         
         pygame.display.flip()
     
@@ -984,7 +1127,7 @@ class Game:
             "• Jo-nathan ALWAYS chases you relentlessly",
             "• Give Jo-nathan an egg to distract him for 10 seconds",
             "• Jeromathy hunts you down if snacks hit 0",
-            "• Angellica pursues you if you watch YouTube or don't code for 30s",
+            "• Angellica pursues you if you play Solitaire or don't code for 30s",
             "• Enemies navigate around walls to catch you!",
             "• NextGen Intern takes snacks but is harmless",
             "• Use cameras to track enemies (drains bandwidth, refills slowly when off)",
@@ -1114,10 +1257,10 @@ class Game:
                 egg_surf = font.render(egg_text, True, GREEN)
                 self.screen.blit(egg_surf, (850, y))
             
-            if self.player.on_youtube:
-                yt_text = "YouTube ON"
-                yt_surf = font.render(yt_text, True, RED)
-                self.screen.blit(yt_surf, (950, y))
+            if self.player.on_solitaire:
+                sol_text = "Solitaire ON"
+                sol_surf = font.render(sol_text, True, RED)
+                self.screen.blit(sol_surf, (950, y))
         
         # Current room
         room_text = f"Room: {self.current_room.value}"
@@ -1135,12 +1278,20 @@ class Game:
                 if interactable.can_interact(self.player):
                     hint = "[E] to interact"
                     if interactable.type == InteractableType.LAPTOP:
-                        hint = "[Y] YouTube, [C] Code"
+                        hint = "[Y] Solitaire, [C] Code"
                     
                     hint_surf = font.render(hint, True, UI_HIGHLIGHT)
                     hint_rect = hint_surf.get_rect(center=(SCREEN_WIDTH // 2, y + 45))
                     self.screen.blit(hint_surf, hint_rect)
                     break
+            
+            # Show mode switching hint if in OFFICE
+            if self.current_room == RoomType.OFFICE:
+                mode_font = pygame.font.Font(None, 28)
+                mode_hint = "[W] Work Mode  |  [S] Slack Mode"
+                mode_surf = mode_font.render(mode_hint, True, (150, 200, 255))
+                mode_rect = mode_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 20))
+                self.screen.blit(mode_surf, mode_rect)
     
     def draw_message(self):
         font = pygame.font.Font(None, 40)
@@ -1544,6 +1695,148 @@ class Game:
             x = random.randint(0, SCREEN_WIDTH)
             self.particle_system.emit(x, 0, random.choice([YELLOW, ORANGE, GREEN]), 5, 50, 3.0)
     
+    def draw_slacking(self):
+        """Draw the slacking screen"""
+        # Draw the slacking background (full screen)
+        if self.slacking_bg_image:
+            # Scale to fit screen while maintaining aspect ratio
+            bg_scaled = pygame.transform.scale(self.slacking_bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+            self.screen.blit(bg_scaled, (0, 0))
+        else:
+            # Fallback: dark blue background
+            self.screen.fill((20, 30, 60))
+        
+        # Semi-transparent overlay for UI readability
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 80))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Title
+        title_font = pygame.font.Font(None, 72)
+        title_surf = title_font.render("SLACKING", True, (100, 200, 255))
+        title_rect = title_surf.get_rect(center=(SCREEN_WIDTH // 2, 80))
+        self.screen.blit(title_surf, title_rect)
+        
+        # Time display
+        time_font = pygame.font.Font(None, 48)
+        hours = int(self.current_time // 60)
+        minutes = int(self.current_time % 60)
+        time_text = f"Time: {hours}:{minutes:02d}"
+        time_surf = time_font.render(time_text, True, WHITE)
+        time_rect = time_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
+        self.screen.blit(time_surf, time_rect)
+        
+        # WIFI meter
+        wifi_font = pygame.font.Font(None, 40)
+        wifi_percent = int((self.wifi / self.max_wifi) * 100)
+        wifi_text = f"WIFI: {wifi_percent}%"
+        wifi_color = GREEN if wifi_percent > 50 else YELLOW if wifi_percent > 25 else RED
+        wifi_surf = wifi_font.render(wifi_text, True, wifi_color)
+        wifi_rect = wifi_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        self.screen.blit(wifi_surf, wifi_rect)
+        
+        # WIFI bar
+        bar_width = 400
+        bar_height = 30
+        bar_x = SCREEN_WIDTH // 2 - bar_width // 2
+        bar_y = 290
+        pygame.draw.rect(self.screen, GRAY, (bar_x, bar_y, bar_width, bar_height), 2)
+        fill_width = int((self.wifi / self.max_wifi) * bar_width)
+        if fill_width > 0:
+            pygame.draw.rect(self.screen, wifi_color, (bar_x, bar_y, fill_width, bar_height))
+        
+        # Controls hint
+        controls_font = pygame.font.Font(None, 36)
+        controls_text = "[W] Work  |  [ESC] Free Roam"
+        controls_surf = controls_font.render(controls_text, True, (200, 200, 200))
+        controls_rect = controls_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
+        self.screen.blit(controls_surf, controls_rect)
+        
+        # Info text
+        info_font = pygame.font.Font(None, 28)
+        info_text = "Take a break! Enemies are still moving..."
+        info_surf = info_font.render(info_text, True, (255, 200, 100))
+        info_rect = info_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+        self.screen.blit(info_surf, info_rect)
+    
+    def draw_working(self):
+        """Draw the working screen"""
+        # Draw the working background (full screen)
+        if self.working_bg_image:
+            # Scale to fit screen while maintaining aspect ratio
+            bg_scaled = pygame.transform.scale(self.working_bg_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
+            self.screen.blit(bg_scaled, (0, 0))
+        else:
+            # Fallback: dark gray background
+            self.screen.fill((40, 40, 50))
+        
+        # Semi-transparent overlay for UI readability
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 80))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Title
+        title_font = pygame.font.Font(None, 72)
+        title_surf = title_font.render("WORKING", True, (100, 255, 100))
+        title_rect = title_surf.get_rect(center=(SCREEN_WIDTH // 2, 80))
+        self.screen.blit(title_surf, title_rect)
+        
+        # Time display
+        time_font = pygame.font.Font(None, 48)
+        hours = int(self.current_time // 60)
+        minutes = int(self.current_time % 60)
+        time_text = f"Time: {hours}:{minutes:02d}"
+        time_surf = time_font.render(time_text, True, WHITE)
+        time_rect = time_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
+        self.screen.blit(time_surf, time_rect)
+        
+        # WIFI meter with warning colors
+        wifi_font = pygame.font.Font(None, 40)
+        wifi_percent = int((self.wifi / self.max_wifi) * 100)
+        wifi_text = f"WIFI: {wifi_percent}%"
+        wifi_color = GREEN if wifi_percent > 50 else YELLOW if wifi_percent > 25 else RED
+        wifi_surf = wifi_font.render(wifi_text, True, wifi_color)
+        wifi_rect = wifi_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        self.screen.blit(wifi_surf, wifi_rect)
+        
+        # WIFI bar
+        bar_width = 400
+        bar_height = 30
+        bar_x = SCREEN_WIDTH // 2 - bar_width // 2
+        bar_y = 290
+        pygame.draw.rect(self.screen, GRAY, (bar_x, bar_y, bar_width, bar_height), 2)
+        fill_width = int((self.wifi / self.max_wifi) * bar_width)
+        if fill_width > 0:
+            pygame.draw.rect(self.screen, wifi_color, (bar_x, bar_y, fill_width, bar_height))
+        
+        # WIFI drain rate indicator
+        drain_font = pygame.font.Font(None, 32)
+        drain_text = f"Draining at {self.wifi_drain_rate:.1f}/sec"
+        drain_surf = drain_font.render(drain_text, True, RED)
+        drain_rect = drain_surf.get_rect(center=(SCREEN_WIDTH // 2, 340))
+        self.screen.blit(drain_surf, drain_rect)
+        
+        # Controls hint
+        controls_font = pygame.font.Font(None, 36)
+        controls_text = "[S] Slack  |  [ESC] Free Roam"
+        controls_surf = controls_font.render(controls_text, True, (200, 200, 200))
+        controls_rect = controls_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
+        self.screen.blit(controls_surf, controls_rect)
+        
+        # Warning text if WIFI is low
+        if wifi_percent <= 25:
+            warning_font = pygame.font.Font(None, 36)
+            warning_text = "WARNING: WIFI CRITICAL!"
+            warning_surf = warning_font.render(warning_text, True, RED)
+            warning_rect = warning_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 150))
+            self.screen.blit(warning_surf, warning_rect)
+        else:
+            info_font = pygame.font.Font(None, 28)
+            info_text = "Keep working... but watch your WIFI!"
+            info_surf = info_font.render(info_text, True, (255, 200, 100))
+            info_rect = info_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50))
+            self.screen.blit(info_surf, info_rect)
+    
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1551,13 +1844,33 @@ class Game:
             
             # Handle key presses
             if event.type == pygame.KEYDOWN:
-                # Pause toggle
+                # Mode switching controls - only work in OFFICE (camera room)
+                if event.key == pygame.K_w:
+                    # Switch to WORKING from SLACKING or PLAYING (only in OFFICE)
+                    if self.state in [GameState.SLACKING, GameState.PLAYING]:
+                        if self.current_room == RoomType.OFFICE:
+                            self.switch_state(GameState.WORKING)
+                        elif self.state == GameState.PLAYING:
+                            self.show_message("Return to Office to access WORKING mode", 2.0)
+                
+                if event.key == pygame.K_s:
+                    # Switch to SLACKING from WORKING or PLAYING (only in OFFICE)
+                    if self.state in [GameState.WORKING, GameState.PLAYING]:
+                        if self.current_room == RoomType.OFFICE:
+                            self.switch_state(GameState.SLACKING)
+                        elif self.state == GameState.PLAYING:
+                            self.show_message("Return to Office to access SLACKING mode", 2.0)
+                
+                # Pause toggle and free roam mode
                 if event.key == pygame.K_ESCAPE:
                     if self.state == GameState.PAUSED:
                         self.switch_state(GameState.PLAYING)
                     elif self.state == GameState.PLAYING:
                         self.switch_state(GameState.PAUSED)
                     elif self.state == GameState.CAMERA:
+                        self.switch_state(GameState.PLAYING)
+                    elif self.state in [GameState.SLACKING, GameState.WORKING]:
+                        # ESC switches to free roam (PLAYING) from SLACKING or WORKING
                         self.switch_state(GameState.PLAYING)
                 
                 # Camera close with E

@@ -15,6 +15,8 @@ class GameState(Enum):
     GAME_OVER = 5
     VICTORY = 6
     TUTORIAL = 7
+    SLACKING = 8
+    WORKING = 9
 
 
 class RoomType(Enum):

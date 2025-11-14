@@ -105,7 +105,7 @@ class Player(Entity):
         """
         super().__init__(x, y, 40, 40, BLUE)
         self.inventory = {"snacks": 5, "egg": False}  # Start with full snacks
-        self.on_youtube = False
+        self.on_solitaire = False
         self.speed = 200
         self.sprite_cache = {}  # Cache sprites for each direction
         self.name_tag = create_name_tag("Brenton")

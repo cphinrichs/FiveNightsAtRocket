@@ -376,14 +376,14 @@ class Jeromathy(Enemy):
 
 class Angellica(Enemy):
     """
-    Angellica: Gets angry when the player watches YouTube.
+    Angellica: Gets angry when the player plays Solitaire.
     """
     
     def __init__(self, x: float, y: float):
         """Initialize Angellica at her desk position."""
         super().__init__(x, y, 38, 38, (200, 100, 200), "Angellica")
         self.speed = 70  # Reduced from 100
-        self.watching_youtube = False
+        self.watching_solitaire = False
         self.desk_pos = (x, y)
         self.at_desk_timer = 0
         self.patrol_timer = 0
@@ -411,8 +411,8 @@ class Angellica(Enemy):
         # Save old position
         old_x, old_y = self.x, self.y
         
-        # Chase player if watching YouTube OR hasn't coded in 30+ seconds
-        if player.on_youtube or last_coding_time > 30.0:
+        # Chase player if playing Solitaire OR hasn't coded in 30+ seconds
+        if player.on_solitaire or last_coding_time > 30.0:
             # Chase player across any room (removed same-room restriction)
             self.state = "chasing"
             px, py = player.get_center()
