@@ -55,8 +55,8 @@ class Interactable:
         player_rect = player.get_rect()
         obj_rect = self.get_rect()
         
-        # Larger interaction range for camera and laptop (30 pixels instead of 20)
-        if self.type in [InteractableType.CAMERA, InteractableType.LAPTOP]:
+        # Larger interaction range for laptop (30 pixels instead of 20)
+        if self.type == InteractableType.LAPTOP:
             inflate_amount = 30
         else:
             inflate_amount = 20
@@ -93,11 +93,6 @@ class Interactable:
             player.inventory["snacks"] = min(5, player.inventory["snacks"] + 1)
             game.play_sound('restock')
             return f"Refilled snacks! ({player.inventory['snacks']}/5)"
-        
-        elif self.type == InteractableType.CAMERA:
-            game.switch_state(GameState.CAMERA)
-            # Camera sound is played in switch_state
-            return "Opening cameras..."
         
         # Laptop and Desk are handled elsewhere (Y/C keys for laptop, desks are non-interactable)
         

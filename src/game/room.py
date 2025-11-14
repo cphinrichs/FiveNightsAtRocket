@@ -56,11 +56,13 @@ class Room:
             ))
         
         elif self.type == RoomType.MEETING_ROOM:
-            # Camera system (moved down from y+50 to y+100 for better access)
-            self.interactables.append(Interactable(
+            # Desk in meeting room (replaces camera)
+            desk = Interactable(
                 self.x + self.width // 2 - 40, self.y + 100, 80, 60, 
-                InteractableType.CAMERA, DARK_GRAY
-            ))
+                InteractableType.DESK, (101, 67, 33)
+            )
+            desk.label = "Meeting Desk"
+            self.interactables.append(desk)
         
         elif self.type == RoomType.CLASSROOM:
             # Laptop

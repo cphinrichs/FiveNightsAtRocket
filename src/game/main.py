@@ -37,7 +37,7 @@ class Game:
         pygame.display.set_caption("Nine to Five at Rocket")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.state = GameState.MENU
+        self.state = GameState.SLACKING  # Start in slacking mode
         
         # Background music
         self.music_loaded = False
@@ -555,14 +555,11 @@ class Game:
         # Meeting Room connections
         self.rooms[RoomType.MEETING_ROOM].add_door(RoomType.HALLWAY, door_hall_meeting)
         
-        # Create player in office (camera room) near the laptop
-        office = self.rooms[RoomType.OFFICE]
-        # Laptop is at x + width/2 - 30, y + height/2 - 20
-        # Position player slightly to the right of the laptop
-        laptop_x = office.x + office.width // 2 - 30
-        laptop_y = office.y + office.height // 2 - 20
-        self.player = Player(laptop_x + 100, laptop_y + 20)
-        self.current_room = RoomType.OFFICE
+        # Create player in Meeting Room (where slacking/working happens)
+        meeting_room = self.rooms[RoomType.MEETING_ROOM]
+        # Position player in the center of the meeting room
+        self.player = Player(meeting_room.x + meeting_room.width // 2, meeting_room.y + meeting_room.height // 2)
+        self.current_room = RoomType.MEETING_ROOM
         
         # Create enemies - ONE OF EACH
         # Only create if not already in the list (prevents duplicates on day reset)
@@ -1005,9 +1002,13 @@ class Game:
         for interactable in current_room.interactables:
             if interactable.type == InteractableType.LAPTOP:
                 if interactable.can_interact(self.player):
+                    # Check if player is in Meeting Room
                     if keys[pygame.K_y]:
-                        self.player.on_solitaire = True
-                        self.show_message("Playing Solitaire... (Time moves faster!)", 2.0)
+                        if self.current_room != RoomType.MEETING_ROOM:
+                            self.show_message("Must be in Meeting Room to play Solitaire!", 2.0)
+                        else:
+                            self.player.on_solitaire = True
+                            self.show_message("Playing Solitaire... (Time moves faster!)", 2.0)
                     elif keys[pygame.K_c]:
                         self.player.on_solitaire = False
                         self.last_coding_time = 0.0  # Reset timer when coding
@@ -1587,8 +1588,8 @@ class Game:
                     self.screen.blit(hint_surf, hint_rect)
                     break
             
-            # Show mode switching hint if in OFFICE
-            if self.current_room == RoomType.OFFICE:
+            # Show mode switching hint if in MEETING_ROOM
+            if self.current_room == RoomType.MEETING_ROOM:
                 mode_font = pygame.font.Font(None, 28)
                 mode_hint = "[W] Work Mode  |  [S] Slack Mode"
                 mode_surf = mode_font.render(mode_hint, True, (150, 200, 255))
@@ -2120,7 +2121,11 @@ class Game:
         
         # Controls hint
         controls_font = pygame.font.Font(None, 36)
-        controls_text = "[S] Slack  |  [ESC] Free Roam"
+        # Show camera hint if in Meeting Room
+        if self.current_room == RoomType.MEETING_ROOM:
+            controls_text = "[C] Camera  |  [S] Slack  |  [ESC] Free Roam"
+        else:
+            controls_text = "[S] Slack  |  [ESC] Free Roam"
         controls_surf = controls_font.render(controls_text, True, (200, 200, 200))
         controls_rect = controls_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
         self.screen.blit(controls_surf, controls_rect)
@@ -2146,22 +2151,22 @@ class Game:
             
             # Handle key presses
             if event.type == pygame.KEYDOWN:
-                # Mode switching controls - only work in OFFICE (camera room)
+                # Mode switching controls - only work in MEETING_ROOM
                 if event.key == pygame.K_w:
-                    # Switch to WORKING from SLACKING or PLAYING (only in OFFICE)
+                    # Switch to WORKING from SLACKING or PLAYING (only in MEETING_ROOM)
                     if self.state in [GameState.SLACKING, GameState.PLAYING]:
-                        if self.current_room == RoomType.OFFICE:
+                        if self.current_room == RoomType.MEETING_ROOM:
                             self.switch_state(GameState.WORKING)
                         elif self.state == GameState.PLAYING:
-                            self.show_message("Return to Office to access WORKING mode", 2.0)
+                            self.show_message("Must be in Meeting Room to access WORKING mode", 2.0)
                 
                 if event.key == pygame.K_s:
-                    # Switch to SLACKING from WORKING or PLAYING (only in OFFICE)
+                    # Switch to SLACKING from WORKING or PLAYING (only in MEETING_ROOM)
                     if self.state in [GameState.WORKING, GameState.PLAYING]:
-                        if self.current_room == RoomType.OFFICE:
+                        if self.current_room == RoomType.MEETING_ROOM:
                             self.switch_state(GameState.SLACKING)
                         elif self.state == GameState.PLAYING:
-                            self.show_message("Return to Office to access SLACKING mode", 2.0)
+                            self.show_message("Must be in Meeting Room to access SLACKING mode", 2.0)
                 
                 # Pause toggle and free roam mode
                 if event.key == pygame.K_ESCAPE:
@@ -2170,14 +2175,22 @@ class Game:
                     elif self.state == GameState.PLAYING:
                         self.switch_state(GameState.PAUSED)
                     elif self.state == GameState.CAMERA:
-                        self.switch_state(GameState.PLAYING)
+                        self.switch_state(GameState.WORKING)  # Return to working mode from camera
                     elif self.state in [GameState.SLACKING, GameState.WORKING]:
                         # ESC switches to free roam (PLAYING) from SLACKING or WORKING
                         self.switch_state(GameState.PLAYING)
                 
-                # Camera close with E
+                # Camera access in working mode
+                if event.key == pygame.K_c and self.state == GameState.WORKING:
+                    # Check if player is in Meeting Room
+                    if self.current_room == RoomType.MEETING_ROOM:
+                        self.switch_state(GameState.CAMERA)
+                    else:
+                        self.show_message("Must be in Meeting Room to use camera!", 2.0)
+                
+                # Camera close with E or ESC (handled above)
                 if event.key == pygame.K_e and self.state == GameState.CAMERA:
-                    self.switch_state(GameState.PLAYING)
+                    self.switch_state(GameState.WORKING)  # Return to working mode
                 
                 # Interaction with E in playing state
                 if event.key == pygame.K_e and self.state == GameState.PLAYING:
@@ -2192,8 +2205,7 @@ class Game:
                             if msg:
                                 self.show_message(msg, 2.0)
                                 # Play generic interact sound if not already played by specific interaction
-                                if interactable.type not in [InteractableType.CAMERA, 
-                                                             InteractableType.CABINET, 
+                                if interactable.type not in [InteractableType.CABINET, 
                                                              InteractableType.REFRIGERATOR]:
                                     self.play_sound('interact')
                             break  # Only interact with one object at a time
