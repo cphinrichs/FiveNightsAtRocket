@@ -156,9 +156,15 @@ def create_enemy_sprite(width: int, height: int, color: Tuple[int, int, int], st
             elif state in ["eating", "at_desk"]:
                 # Green indicator for calm states
                 pygame.draw.circle(sprite, (0, 255, 0, 180), (width - 5, 5), 5)
-            elif state == "idle":
-                # Yellow indicator for idle
+            elif state in ["idle", "patrolling", "returning_to_desk"]:
+                # Yellow indicator for idle/patrolling/returning states
                 pygame.draw.circle(sprite, (255, 255, 0, 180), (width - 5, 5), 5)
+            elif state in ["going_for_snack", "returning"]:
+                # Orange indicator for interns on the move
+                pygame.draw.circle(sprite, (255, 165, 0, 180), (width - 5, 5), 5)
+            else:
+                # Default: blue indicator for any other state
+                pygame.draw.circle(sprite, (100, 150, 255, 180), (width - 5, 5), 5)
             
             return sprite
     except Exception as e:
