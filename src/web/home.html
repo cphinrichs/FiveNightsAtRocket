@@ -64,7 +64,7 @@
                         if (gameResponse.ok) {
                             // Get the actual URL from the response (supporting redirects or dynamic filenames)
                             const url = gameResponse.url;
-                            document.getElementById('game').innerHTML = `<iframe src="${url}" width="800" height="600" style="border:none;"></iframe>`;
+                            document.getElementById('game').innerHTML = `<iframe src="${url}" width="800" height="450" style="border:none;"></iframe>`;
                         } else {
                             alert('Unable to load game. Returning to login screen.');
                             // Show login form again and clear game area
