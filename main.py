@@ -5,6 +5,8 @@ import math
 import threading
 import os
 from openai import OpenAI
+import heapq
+from collections import deque
 
 # Initialize Pygame
 pygame.init()
@@ -78,8 +80,21 @@ game_state = "playing"  # "playing", "game_over"
 
 # WIFI resource system
 wifi = 100.0  # WIFI percentage (0-100)
-wifi_drain_rate = 0.05  # WIFI drains per frame when viewing cameras
+wifi_drain_rate = 0.015  # WIFI drains per frame when working or viewing cameras (slower drain)
 at_desk = False  # True = working.jpg (at desk), False = slacking.jpg (away from desk)
+
+# Fridge system (Jerome mechanic - like FNAF music box)
+fridge_level = 100.0  # Fridge fullness (0-100)
+fridge_drain_rate = 0.02  # Drains over time when in office mode
+fridge_restock_amount = 50.0  # How much restocking adds
+
+# Egg inventory (Jonathan defense)
+has_egg = False  # Player starts without an egg
+
+# Time system (like FNAF hours)
+game_time = 0.0  # Time in seconds
+game_time_speed = 1.0  # Time progresses at 1 second per real second when in office
+target_time = 300.0  # Win after 5 minutes (300 seconds) - can adjust this
 
 # Particle System
 class Particle:
@@ -264,47 +279,51 @@ jerome_sprite = None
 # Timer settings (in seconds)
 start_time = pygame.time.get_ticks()
 
-# Snack stocking system
-snacks_stocked = 0
-snacks_needed = 5
-snack_check_timer = 0
-snack_check_interval = 15000  # Check every 15 seconds
-
-# Difficulty scaling - snack consumption gets faster over time
-snack_consumption_interval = 12000  # Start at 12 seconds
-snack_consumption_min = 4000  # Minimum 4 seconds
-snack_consumption_last = 0
-difficulty_increase_rate = 200  # Decrease interval by 200ms each consumption
-
-# Dynamic supply spawning
-active_supplies = []  # List of active supply stations
-max_supplies = 2  # Max number of supplies active at once
-
-# Player inventory
-carrying_snack = False
-
 # Jerome (enemy) settings
 jerome_active = True  # Jerome is always present, walking around
 jerome_x = width // 2
 jerome_y = height // 2
 jerome_size = 45
-jerome_patrol_speed = 1.0  # Slow patrol speed
-jerome_angry_speed = 3.0  # Fast chase speed
+jerome_patrol_speed = 1.5  # Slow patrol speed
+jerome_angry_speed = 3.5  # Fast chase speed
 jerome_color = (60, 40, 70)  # Dark purple/gray
 jerome_room = 1  # Starts in hallway
-jerome_state = "patrolling"  # "patrolling", "angry"
-jerome_patience = 100  # Patience meter (depletes when snacks are low)
+jerome_state = "patrol"  # "patrol", "angry"
 jerome_target_x = 0
 jerome_target_y = 0
 jerome_patrol_timer = 0
+jerome_path = []  # Current pathfinding path
+jerome_path_index = 0  # Current position in path
+jerome_idle_timer = 0  # Time before choosing new destination
 
-# Patrol waypoints for each room
+# Patrol waypoints for each room (fallback if pathfinding fails)
 patrol_waypoints = {
-    0: [(200, 100), (400, 200), (300, 400), (150, 300)],  # Office
+    0: [(150, 150), (400, 200), (500, 400), (300, 350)],  # Your personal office
     1: [(200, 200), (500, 300), (800, 200), (500, 400)],  # Hallway
     2: [(300, 150), (600, 250), (400, 450)]  # Breakroom
 }
-current_waypoint_index = 0
+jerome_waypoint_index = 0
+
+# Jonathan (second enemy) settings
+jonathan_active = True
+jonathan_x = width // 3
+jonathan_y = height // 3
+jonathan_size = 45
+jonathan_patrol_speed = 1.2  # Slightly slower than Jerome
+jonathan_chase_speed = 2.5  # Speed when chasing player with egg
+jonathan_color = (50, 70, 90)  # Blueish gray
+jonathan_room = 2  # Starts in breakroom
+jonathan_target_x = 0
+jonathan_target_y = 0
+jonathan_patrol_timer = 0
+jonathan_waypoint_index = 0
+jonathan_sprite = None
+jonathan_path = []  # Current pathfinding path
+jonathan_path_index = 0  # Current position in path
+jonathan_idle_timer = 0  # Time before choosing new destination
+jonathan_state = "patrol"  # "patrol" or "chasing_egg"
+egg_held_time = 0  # Track how long player has held the egg
+egg_chase_threshold = 30.0  # Seconds before Jonathan starts chasing
 
 # MMO-style UI variables
 player_health = 100
@@ -319,16 +338,17 @@ is_sprinting = False
 danger_flash = 0
 warning_text = ""
 warning_timer = 0
-objective_text = "Stock the Break Room with 5 snacks to keep Jerome happy!"
+objective_text = "Survive 5 minutes! Keep FRIDGE stocked & get EGG for defense!"
 show_tutorial = True
 last_patience_warning = 0
 warning_timer = 0
 
-# ChatGPT Joke System
-joke_text = "Loading joke..."
-joke_timer = 0
-joke_fetch_timer = 0
-joke_fetch_interval = 30000  # Fetch new joke every 30 seconds
+# ChatGPT Joke System - Jonathan displays jokes
+jonathan_joke_text = "Loading joke..."
+jonathan_joke_timer = 0
+jonathan_joke_fetch_timer = 0
+jonathan_joke_fetch_interval = 10000  # Fetch new joke every 10 seconds
+jonathan_joke_display_duration = 10000  # Show joke for 10 seconds
 is_fetching_joke = False
 
 # Initialize OpenAI client (set your API key as environment variable OPENAI_API_KEY)
@@ -338,11 +358,11 @@ try:
 except:
     client = None
     chatgpt_available = False
-    joke_text = "Set OPENAI_API_KEY environment variable to enable jokes!"
+    jonathan_joke_text = "Set OPENAI_API_KEY environment variable to enable jokes!"
 
 def fetch_joke_from_chatgpt():
-    """Fetch a joke from ChatGPT in a separate thread"""
-    global joke_text, is_fetching_joke
+    """Fetch a joke from ChatGPT in a separate thread for Jonathan"""
+    global jonathan_joke_text, is_fetching_joke
     
     if not chatgpt_available:
         return
@@ -351,20 +371,20 @@ def fetch_joke_from_chatgpt():
     
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a comedian. Tell short, funny jokes (2-3 sentences max)."},
+                {"role": "system", "content": "You are a comedian. Tell very short, funny jokes (1-2 sentences max)."},
                 {"role": "user", "content": "Tell me a random funny joke."}
             ],
-            max_tokens=100,
+            max_tokens=50,
             temperature=0.9
         )
         
         new_joke = response.choices[0].message.content.strip()
-        joke_text = new_joke
+        jonathan_joke_text = new_joke
         
     except Exception as e:
-        joke_text = f"Joke error: {str(e)[:50]}..."
+        jonathan_joke_text = f"Joke error: {str(e)[:50]}..."
     
     is_fetching_joke = False
 
@@ -384,7 +404,7 @@ current_room = 0
 # Define rooms with walls and transitions
 # Each room has: walls list, floor color, transitions, and furniture/objects
 rooms = {
-    0: {  # Office Room - Abandoned workspace
+    0: {  # Your Personal Office - Small workspace (only room where you can access desk/cameras)
         'walls': [
             pygame.Rect(0, 0, width, 20),                    # Top wall
             pygame.Rect(0, 0, 20, height),                   # Left wall
@@ -394,21 +414,23 @@ rooms = {
         ],
         'floor_color': CARPET_BLUE,
         'furniture': [
-            # Longer desk rows (4 rows of long desks)
-            {'rect': pygame.Rect(80, 100, 200, 50), 'color': DESK_BROWN, 'label': None},
-            {'rect': pygame.Rect(320, 100, 200, 50), 'color': DESK_BROWN, 'label': None},
+            # Your main desk (center-left)
+            {'rect': pygame.Rect(80, 250, 180, 80), 'color': DESK_BROWN, 'label': "Your Desk"},
             
-            {'rect': pygame.Rect(80, 180, 200, 50), 'color': DESK_BROWN, 'label': None},
-            {'rect': pygame.Rect(320, 180, 200, 50), 'color': DESK_BROWN, 'label': None},
+            # Filing cabinet (left side)
+            {'rect': pygame.Rect(50, 80, 60, 100), 'color': OFFICE_GRAY, 'label': "Files"},
             
-            {'rect': pygame.Rect(80, 260, 200, 50), 'color': DESK_BROWN, 'label': None},
-            {'rect': pygame.Rect(320, 260, 200, 50), 'color': DESK_BROWN, 'label': None},
+            # Bookshelf (top)
+            {'rect': pygame.Rect(300, 40, 250, 50), 'color': RUSTY_BROWN, 'label': None},
             
-            {'rect': pygame.Rect(80, 340, 200, 50), 'color': DESK_BROWN, 'label': None},
-            {'rect': pygame.Rect(320, 340, 200, 50), 'color': DESK_BROWN, 'label': None},
+            # Small side table (bottom)
+            {'rect': pygame.Rect(350, 450, 100, 60), 'color': DESK_BROWN, 'label': None},
             
-            # Jerome's desk
-            {'rect': pygame.Rect(150, 450, 150, 80), 'color': RUSTY_BROWN, 'label': "Jerome's Desk"},
+            # Plant or decoration
+            {'rect': pygame.Rect(600, 80, 40, 40), 'color': (80, 120, 80), 'label': "Plant"},
+            
+            # Trash can
+            {'rect': pygame.Rect(280, 320, 30, 40), 'color': OFFICE_GRAY, 'label': None},
         ],
         'transitions': [
             # Exit to hallway
@@ -454,8 +476,8 @@ rooms = {
             # Long break table with snacks (table is non-collidable decoration)
             {'rect': pygame.Rect(width // 2 - 150, height // 2 - 40, 300, 80), 'color': DESK_BROWN, 'label': None, 'type': 'table_with_snacks'},
             
-            # Old vending machine
-            {'rect': pygame.Rect(50, 50, 60, 100), 'color': WALL_DARK, 'label': "Broken"},
+            # Fridge next to the table (right side)
+            {'rect': pygame.Rect(width // 2 + 170, height // 2 - 50, 60, 100), 'color': WALL_DARK, 'label': "Broken"},
         ],
         'decorations': [
             # Snacks on the table (non-collidable)
@@ -475,48 +497,167 @@ rooms = {
 walls = rooms[current_room]['walls']
 transitions = rooms[current_room]['transitions']
 
-# Function to spawn a new supply station in a random valid location
-def spawn_new_supply():
-    """Spawn a supply station in a random room at a random valid position"""
-    if len(active_supplies) >= max_supplies:
-        return
-    
-    # Pick a random room
-    room_id = random.randint(0, 2)
-    
-    # Define safe spawn areas for each room (avoiding walls and furniture)
-    safe_areas = {
-        0: [(100, 60, 400, 380)],  # Office - between desks
-        1: [(120, 80, 860, 440)],  # Hallway - center corridor
-        2: [(100, 60, 300, 200), (600, 60, 300, 200)]  # Breakroom - sides
-    }
-    
-    # Pick a random safe area in the room
-    areas = safe_areas[room_id]
-    area = random.choice(areas)
-    
-    # Random position within the area
-    x = random.randint(area[0], area[0] + area[2] - 50)
-    y = random.randint(area[1], area[1] + area[3] - 50)
-    
-    # Random color for variety
-    colors = [RUSTY_BROWN, DIM_YELLOW, SICKLY_GREEN, ORANGE, PURPLE]
-    color = random.choice(colors)
-    
-    active_supplies.append({
-        'x': x,
-        'y': y,
-        'room': room_id,
-        'color': color
-    })
 
-# Initialize starting supplies
-for _ in range(max_supplies):
-    spawn_new_supply()
+# ==================== PATHFINDING SYSTEM ====================
+
+# Grid-based pathfinding settings
+GRID_SIZE = 20  # Size of each grid cell (smaller = more precise, slower)
+grid_width = width // GRID_SIZE
+grid_height = height // GRID_SIZE
+
+class NavigationGrid:
+    """Grid-based navigation system for pathfinding"""
+    def __init__(self):
+        self.grids = {}  # One grid per room
+        self.build_navigation_grids()
+    
+    def build_navigation_grids(self):
+        """Build walkable grids for all rooms"""
+        for room_id, room_data in rooms.items():
+            grid = [[True for _ in range(grid_width)] for _ in range(grid_height)]
+            
+            # Mark walls as unwalkable
+            for wall in room_data['walls']:
+                for y in range(max(0, wall.top // GRID_SIZE), min(grid_height, (wall.bottom + GRID_SIZE - 1) // GRID_SIZE)):
+                    for x in range(max(0, wall.left // GRID_SIZE), min(grid_width, (wall.right + GRID_SIZE - 1) // GRID_SIZE)):
+                        grid[y][x] = False
+            
+            # Mark furniture as unwalkable
+            for furn in room_data['furniture']:
+                rect = furn['rect']
+                for y in range(max(0, rect.top // GRID_SIZE), min(grid_height, (rect.bottom + GRID_SIZE - 1) // GRID_SIZE)):
+                    for x in range(max(0, rect.left // GRID_SIZE), min(grid_width, (rect.right + GRID_SIZE - 1) // GRID_SIZE)):
+                        grid[y][x] = False
+            
+            self.grids[room_id] = grid
+    
+    def is_walkable(self, room_id, x, y):
+        """Check if a grid position is walkable"""
+        grid_x = int(x // GRID_SIZE)
+        grid_y = int(y // GRID_SIZE)
+        
+        if grid_x < 0 or grid_x >= grid_width or grid_y < 0 or grid_y >= grid_height:
+            return False
+        
+        if room_id not in self.grids:
+            return False
+        
+        return self.grids[room_id][grid_y][grid_x]
+    
+    def get_neighbors(self, room_id, grid_x, grid_y):
+        """Get walkable neighboring cells (8-directional)"""
+        neighbors = []
+        
+        # 8 directions: N, S, E, W, NE, NW, SE, SW
+        directions = [
+            (0, -1, 1.0),   # North
+            (0, 1, 1.0),    # South
+            (1, 0, 1.0),    # East
+            (-1, 0, 1.0),   # West
+            (1, -1, 1.4),   # Northeast (diagonal)
+            (-1, -1, 1.4),  # Northwest (diagonal)
+            (1, 1, 1.4),    # Southeast (diagonal)
+            (-1, 1, 1.4)    # Southwest (diagonal)
+        ]
+        
+        for dx, dy, cost in directions:
+            new_x, new_y = grid_x + dx, grid_y + dy
+            
+            if 0 <= new_x < grid_width and 0 <= new_y < grid_height:
+                if self.grids[room_id][new_y][new_x]:
+                    # For diagonal moves, check if the path is clear
+                    if dx != 0 and dy != 0:
+                        # Check both adjacent cells for diagonal movement
+                        if self.grids[room_id][grid_y][new_x] and self.grids[room_id][new_y][grid_x]:
+                            neighbors.append((new_x, new_y, cost))
+                    else:
+                        neighbors.append((new_x, new_y, cost))
+        
+        return neighbors
+
+def heuristic(ax, ay, bx, by):
+    """Manhattan distance heuristic for A*"""
+    return abs(ax - bx) + abs(ay - by)
+
+def astar_pathfind(nav_grid, room_id, start_x, start_y, goal_x, goal_y):
+    """
+    A* pathfinding algorithm
+    Returns list of (x, y) world coordinates forming a path, or None if no path found
+    """
+    # Convert world coordinates to grid coordinates
+    start_gx = int(start_x // GRID_SIZE)
+    start_gy = int(start_y // GRID_SIZE)
+    goal_gx = int(goal_x // GRID_SIZE)
+    goal_gy = int(goal_y // GRID_SIZE)
+    
+    # Bounds checking
+    if not (0 <= start_gx < grid_width and 0 <= start_gy < grid_height):
+        return None
+    if not (0 <= goal_gx < grid_width and 0 <= goal_gy < grid_height):
+        return None
+    
+    # Check if start and goal are walkable
+    if not nav_grid.is_walkable(room_id, start_x, start_y):
+        return None
+    if not nav_grid.is_walkable(room_id, goal_x, goal_y):
+        return None
+    
+    # A* algorithm
+    frontier = []  # Priority queue: (priority, counter, (x, y))
+    heapq.heappush(frontier, (0, 0, (start_gx, start_gy)))
+    
+    came_from = {}
+    cost_so_far = {}
+    came_from[(start_gx, start_gy)] = None
+    cost_so_far[(start_gx, start_gy)] = 0
+    
+    counter = 1  # To break ties in priority queue
+    
+    while frontier:
+        _, _, current = heapq.heappop(frontier)
+        current_x, current_y = current
+        
+        # Early exit when goal reached
+        if current_x == goal_gx and current_y == goal_gy:
+            break
+        
+        # Explore neighbors
+        for next_x, next_y, move_cost in nav_grid.get_neighbors(room_id, current_x, current_y):
+            new_cost = cost_so_far[current] + move_cost
+            
+            if (next_x, next_y) not in cost_so_far or new_cost < cost_so_far[(next_x, next_y)]:
+                cost_so_far[(next_x, next_y)] = new_cost
+                priority = new_cost + heuristic(next_x, next_y, goal_gx, goal_gy)
+                heapq.heappush(frontier, (priority, counter, (next_x, next_y)))
+                counter += 1
+                came_from[(next_x, next_y)] = current
+    
+    # Reconstruct path
+    if (goal_gx, goal_gy) not in came_from:
+        return None  # No path found
+    
+    path = []
+    current = (goal_gx, goal_gy)
+    
+    while current is not None:
+        # Convert grid coordinates back to world coordinates (center of cell)
+        world_x = current[0] * GRID_SIZE + GRID_SIZE // 2
+        world_y = current[1] * GRID_SIZE + GRID_SIZE // 2
+        path.append((world_x, world_y))
+        current = came_from[current]
+    
+    path.reverse()
+    return path
+
+# Create global navigation grid
+nav_grid = NavigationGrid()
+
+# ==================== END PATHFINDING SYSTEM ====================
+
 
 # Initialize sprites
 def init_sprites():
-    global player_sprite, jerome_sprite, furniture_sprites, all_sprites
+    global player_sprite, jerome_sprite, jonathan_sprite, furniture_sprites, all_sprites
     
     # Clear existing sprites
     all_sprites.empty()
@@ -529,6 +670,10 @@ def init_sprites():
     # Create Jerome sprite
     jerome_sprite = Jerome(jerome_x, jerome_y)
     all_sprites.add(jerome_sprite)
+    
+    # Create Jonathan sprite
+    jonathan_sprite = Jerome(jonathan_x, jonathan_y)  # Reuse Jerome class for now
+    all_sprites.add(jonathan_sprite)
     
     # Create furniture sprites for all rooms (cache them)
     for room_id, room_data in rooms.items():
@@ -643,88 +788,7 @@ def draw_mmo_ui(surface, current_time):
     stamina_text = health_font.render(f"Stamina: {int(player_stamina)}", True, WHITE)
     surface.blit(stamina_text, (health_bar_x + health_bar_width // 2 - stamina_text.get_width() // 2, stamina_bar_y + 2))
     
-    # Request/Objective status (right side)
-    status_box_width = 220
-    status_box_x = width - status_box_width - 10
-    status_box_y = 10
-    
-    pygame.draw.rect(surface, (40, 40, 40), (status_box_x, status_box_y, status_box_width, 90), border_radius=5)
-    pygame.draw.rect(surface, (100, 100, 100), (status_box_x, status_box_y, status_box_width, 90), 2, border_radius=5)
-    
-    status_title = health_font.render("SNACK STATUS", True, (200, 200, 200))
-    surface.blit(status_title, (status_box_x + status_box_width // 2 - status_title.get_width() // 2, status_box_y + 5))
-    
-    # Show snack count with visual icons
-    snack_font = pygame.font.Font(None, 28)
-    snack_text = snack_font.render(f"{snacks_stocked} / {snacks_needed}", True, WHITE)
-    surface.blit(snack_text, (status_box_x + status_box_width // 2 - snack_text.get_width() // 2, status_box_y + 30))
-    
-    # Snack icons
-    icon_y = status_box_y + 62
-    icon_size = 12
-    for i in range(snacks_needed):
-        icon_x = status_box_x + 40 + i * 30
-        if i < snacks_stocked:
-            # Filled snack (colorful)
-            snack_colors = [RED, ORANGE, YELLOW, PURPLE, GREEN]
-            pygame.draw.circle(surface, snack_colors[i % len(snack_colors)], (icon_x, icon_y), icon_size)
-            pygame.draw.circle(surface, WHITE, (icon_x, icon_y), icon_size, 2)
-        else:
-            # Empty slot
-            pygame.draw.circle(surface, (80, 80, 80), (icon_x, icon_y), icon_size)
-            pygame.draw.circle(surface, (120, 120, 120), (icon_x, icon_y), icon_size, 2)
-    
-    # Jerome's Patience meter
-    patience_bar_y = status_box_y + 95
-    patience_bar_width = status_box_width - 20
-    
-    patience_title_font = pygame.font.Font(None, 16)
-    patience_title = patience_title_font.render("Jerome's Patience:", True, (200, 200, 200))
-    surface.blit(patience_title, (status_box_x + 10, patience_bar_y - 15))
-    
-    pygame.draw.rect(surface, (60, 60, 60), (status_box_x + 10, patience_bar_y, patience_bar_width, 14), border_radius=3)
-    
-    if jerome_patience > 0:
-        patience_fill = int(patience_bar_width * (jerome_patience / 100))
-        if jerome_patience > 60:
-            patience_color = (100, 255, 100)
-        elif jerome_patience > 30:
-            patience_color = (255, 255, 100)
-        else:
-            patience_color = (255, 100, 100)
-        pygame.draw.rect(surface, patience_color, (status_box_x + 10, patience_bar_y, patience_fill, 14), border_radius=3)
-    
-    patience_label = pygame.font.Font(None, 14).render(f"{int(jerome_patience)}%", True, WHITE)
-    surface.blit(patience_label, (status_box_x + patience_bar_width // 2 + 10 - patience_label.get_width() // 2, patience_bar_y + 1))
-    
-    # Adjust box height to fit patience meter
-    pygame.draw.rect(surface, (40, 40, 40), (status_box_x, status_box_y, status_box_width, 120), border_radius=5)
-    pygame.draw.rect(surface, (100, 100, 100), (status_box_x, status_box_y, status_box_width, 120), 2, border_radius=5)
-    
-    # Redraw title and content over adjusted box
-    surface.blit(status_title, (status_box_x + status_box_width // 2 - status_title.get_width() // 2, status_box_y + 5))
-    surface.blit(snack_text, (status_box_x + status_box_width // 2 - snack_text.get_width() // 2, status_box_y + 30))
-    for i in range(snacks_needed):
-        icon_x = status_box_x + 40 + i * 30
-        if i < snacks_stocked:
-            snack_colors = [RED, ORANGE, YELLOW, PURPLE, GREEN]
-            pygame.draw.circle(surface, snack_colors[i % len(snack_colors)], (icon_x, icon_y), icon_size)
-            pygame.draw.circle(surface, WHITE, (icon_x, icon_y), icon_size, 2)
-        else:
-            pygame.draw.circle(surface, (80, 80, 80), (icon_x, icon_y), icon_size)
-            pygame.draw.circle(surface, (120, 120, 120), (icon_x, icon_y), icon_size, 2)
-    surface.blit(patience_title, (status_box_x + 10, patience_bar_y - 15))
-    pygame.draw.rect(surface, (60, 60, 60), (status_box_x + 10, patience_bar_y, patience_bar_width, 14), border_radius=3)
-    if jerome_patience > 0:
-        patience_fill = int(patience_bar_width * (jerome_patience / 100))
-        if jerome_patience > 60:
-            patience_color = (100, 255, 100)
-        elif jerome_patience > 30:
-            patience_color = (255, 255, 100)
-        else:
-            patience_color = (255, 100, 100)
-        pygame.draw.rect(surface, patience_color, (status_box_x + 10, patience_bar_y, patience_fill, 14), border_radius=3)
-    surface.blit(patience_label, (status_box_x + patience_bar_width // 2 + 10 - patience_label.get_width() // 2, patience_bar_y + 1))
+
     
     # Minimap (bottom right)
     minimap_size = 120
@@ -827,12 +891,45 @@ while running:
             
             elif game_mode == "walk":
                 if event.key == pygame.K_ESCAPE or event.key == pygame.K_c:
-                    # Switch back to office mode
-                    game_mode = "office"
+                    # Can only return to office mode if in room 0 (office space)
+                    if current_room == 0:
+                        game_mode = "office"
+                    else:
+                        warning_text = "Return to your office to access desk!"
+                        warning_timer = current_time
     
     # Get current time
     current_time = pygame.time.get_ticks()
     elapsed_time = (current_time - start_time) / 1000  # Convert to seconds
+    
+    # Time Progression System - only progresses when in office mode
+    if game_mode == "office" and game_state == "playing":
+        game_time += game_time_speed * (1/60)  # Assuming 60 FPS
+        
+        # Fridge Depletion - drains over time when in office
+        if fridge_level > 0:
+            fridge_level -= fridge_drain_rate
+            fridge_level = max(0, fridge_level)
+    
+    # Track egg held time (always counting in all modes)
+    if has_egg and game_state == "playing":
+        egg_held_time += (1/60)  # Increment in real-time
+        
+        # Check if Jonathan should start chasing
+        if egg_held_time >= egg_chase_threshold:
+            # Trigger warning when Jonathan first starts chasing
+            if jonathan_state != "chasing_egg":
+                warning_text = "Jonathan wants his egg back!"
+                warning_timer = current_time
+            jonathan_state = "chasing_egg"
+        else:
+            jonathan_state = "patrol"
+    else:
+        # Reset if no egg
+        if not has_egg:
+            egg_held_time = 0
+            if jonathan_state == "chasing_egg":
+                jonathan_state = "patrol"
     
     # WIFI Drain System - drains when viewing cameras OR when at desk working
     if wifi > 0:
@@ -849,49 +946,22 @@ while running:
     if wifi <= 0 and game_state == "playing":
         game_state = "game_over"
     
-    # ChatGPT Joke Fetch Timer
-    if chatgpt_available and current_time - joke_fetch_timer > joke_fetch_interval:
-        joke_fetch_timer = current_time
+    # Check for fridge empty - Jerome spawns and kills player
+    if fridge_level <= 0 and game_state == "playing":
+        game_state = "game_over"
+        # Could add a specific "Jerome got you" message later
+    
+    # Check for win condition
+    if game_time >= target_time and game_state == "playing":
+        game_state = "win"
+    
+    # Jonathan Joke Fetch Timer (every 10 seconds)
+    if chatgpt_available and current_time - jonathan_joke_fetch_timer > jonathan_joke_fetch_interval:
+        jonathan_joke_fetch_timer = current_time
+        jonathan_joke_timer = current_time  # Reset display timer
         start_joke_fetch()
     
-    # NEW GAME LOGIC - Snack Stocking System
-    if game_mode != "tutorial" and game_state == "playing":
-        # Periodic snack checks (every 15 seconds)
-        if current_time - snack_check_timer > snack_check_interval:
-            snack_check_timer = current_time
-            
-            # Check if snacks are low
-            if snacks_stocked < snacks_needed:
-                # Deplete Jerome's patience based on how low snacks are
-                shortage = snacks_needed - snacks_stocked
-                patience_loss = shortage * 8  # More shortage = faster patience loss
-                jerome_patience = max(0, jerome_patience - patience_loss)
-                
-                if jerome_patience <= 50 and current_time - last_patience_warning > 10000:
-                    warning_text = f"Jerome's patience is low! Stock more snacks! ({snacks_stocked}/{snacks_needed})"
-                    warning_timer = current_time
-                    last_patience_warning = current_time
-                
-                # Jerome gets angry when patience hits 0
-                if jerome_patience <= 0 and jerome_state != "angry":
-                    jerome_state = "angry"
-                    objective_text = "JEROME IS ANGRY! STOCK SNACKS TO CALM HIM DOWN!"
-                    danger_flash = 30
-                    player_health = max(0, player_health - 15)
-            else:
-                # Snacks are good, restore patience
-                jerome_patience = min(100, jerome_patience + 5)
-                if jerome_state == "angry":
-                    # Jerome calms down when snacks are fully stocked
-                    jerome_state = "patrolling"
-                    objective_text = "Jerome calmed down. Keep snacks stocked!"
-                    player_health = min(player_max_health, player_health + 20)
-                    warning_text = "Good job! (+20 HP)"
-                    warning_timer = current_time
-        
-        # Continuous patience drain when understocked (faster feedback)
-        if snacks_stocked < snacks_needed and current_time % 1000 < 50:
-            jerome_patience = max(0, jerome_patience - 0.3)
+
         
         # Jerome AI based on state
         if jerome_state == "angry":
@@ -1037,124 +1107,108 @@ while running:
                 size=2
             ))
         
-        # SNACK SYSTEM - Pickup and Stock (ONE SNACK AT A TIME)
+        # NEW GAME MECHANICS - Fridge Restocking and Egg Pickup
         if keys[pygame.K_e]:
-            # PICKUP: Near supply station anywhere in the world
-            if not carrying_snack:
-                for supply in active_supplies:
-                    supply_rect = pygame.Rect(supply['x'], supply['y'], 50, 50)
-                    if supply['room'] == current_room and player_rect.colliderect(supply_rect.inflate(50, 50)):
-                        carrying_snack = True
-                        objective_text = f"Take snack to the Break Room table! ({snacks_stocked}/{snacks_needed})"
-                        warning_text = "Picked up snack!"
-                        warning_timer = current_time
-                        # Remove this supply and spawn a new one
-                        active_supplies.remove(supply)
-                        spawn_new_supply()
-                        break
-            
-            # STOCK: Place snack on break room table
-            elif carrying_snack and current_room == 2:
-                # Check if near the table
+            # Check if in breakroom (room 2)
+            if current_room == 2:
                 table_rect = pygame.Rect(width // 2 - 150, height // 2 - 40, 300, 80)
-                if player_rect.colliderect(table_rect.inflate(60, 60)):
-                    # Successfully stocked!
-                    carrying_snack = False
-                    snacks_stocked += 1
-                    
-                    # Update objective
-                    if snacks_stocked >= snacks_needed:
-                        objective_text = f"Table fully stocked! ({snacks_stocked}/{snacks_needed}) Keep it that way!"
-                    else:
-                        objective_text = f"Stock more snacks! ({snacks_stocked}/{snacks_needed})"
-                    
-                    warning_text = f"Snack stocked! ({snacks_stocked}/{snacks_needed})"
+                fridge_rect = pygame.Rect(width // 2 + 170, height // 2 - 50, 60, 100)  # The fridge next to the table
+                
+                # RESTOCK FRIDGE: At the broken fridge (top left of break room)
+                if player_rect.colliderect(fridge_rect.inflate(60, 60)) and fridge_level < 100:
+                    fridge_level = min(100, fridge_level + fridge_restock_amount)
+                    warning_text = f"Fridge restocked! ({int(fridge_level)}%)"
                     warning_timer = current_time
-                    
                     # Visual feedback
-                    for _ in range(15):
+                    for _ in range(10):
+                        particles.append(Particle(
+                            fridge_rect.centerx + random.randint(-30, 30),
+                            fridge_rect.centery + random.randint(-40, 40),
+                            (100, 200, 255),
+                            lifetime=30,
+                            vel_x=random.uniform(-1, 1),
+                            vel_y=random.uniform(-2, -0.5),
+                            size=3
+                        ))
+                
+                # PICK UP EGG: At the break room table (if don't have one)
+                if player_rect.colliderect(table_rect.inflate(60, 60)) and not has_egg:
+                    has_egg = True
+                    egg_held_time = 0  # Reset timer when picking up egg
+                    warning_text = "Egg acquired! (Jonathan defense)"
+                    warning_timer = current_time
+                    # Visual feedback
+                    for _ in range(10):
                         particles.append(Particle(
                             table_rect.centerx + random.randint(-60, 60),
                             table_rect.centery + random.randint(-20, 20),
-                            random.choice([RED, ORANGE, YELLOW, PURPLE, GREEN]),
-                            lifetime=40,
+                            (255, 255, 100),
+                            lifetime=30,
                             vel_x=random.uniform(-1, 1),
                             vel_y=random.uniform(-2, -0.5),
-                            size=4
+                            size=3
                         ))
         
-        # Snacks disappear over time (A NextGenner eats them) - DIFFICULTY RAMPS UP
-        if current_time - snack_consumption_last > snack_consumption_interval and snacks_stocked > 0:
-            snack_consumption_last = current_time
-            snacks_stocked = max(0, snacks_stocked - 1)
-            
-            # Increase difficulty - consumption gets faster over time
-            snack_consumption_interval = max(snack_consumption_min, snack_consumption_interval - difficulty_increase_rate)
-            
-            if snacks_stocked < snacks_needed:
-                warning_text = f"A NextGenner ate a snack! Restock! ({snacks_stocked}/{snacks_needed})"
-                warning_timer = current_time
+
     
-    # Jerome AI - Movement (patrols or chases)
+    # ============ JEROME AI - Pathfinding-based Movement ============
     if jerome_active:
-        old_jerome_x = jerome_x
-        old_jerome_y = jerome_y
-        
         # Update Jerome's animation
         jerome_sprite.update_animation()
         
         # Determine speed based on state
         if jerome_state == "angry":
             current_speed = jerome_angry_speed
+            target_x, target_y = player_x, player_y  # Chase player
         else:
             current_speed = jerome_patrol_speed
+            # Choose random waypoint in current room for patrol
+            if not jerome_path or jerome_idle_timer <= 0:
+                waypoints = patrol_waypoints.get(jerome_room, [(width//2, height//2)])
+                target_waypoint = random.choice(waypoints)
+                target_x, target_y = target_waypoint
+                jerome_idle_timer = random.randint(120, 300)  # Wait before next destination
+            else:
+                jerome_idle_timer -= 1
+                target_x = jerome_target_x if jerome_target_x else jerome_x
+                target_y = jerome_target_y if jerome_target_y else jerome_y
         
-        # Chase logic when angry - override patrol
-        if jerome_state == "angry" and jerome_room == current_room:
-            # Move towards player (simple chase AI)
-            if jerome_x < player_x:
-                jerome_x += current_speed
-            elif jerome_x > player_x:
-                jerome_x -= current_speed
+        # Generate new path if needed
+        if not jerome_path or jerome_path_index >= len(jerome_path):
+            # Try to pathfind to target
+            new_path = astar_pathfind(nav_grid, jerome_room, jerome_x, jerome_y, target_x, target_y)
+            if new_path and len(new_path) > 1:
+                jerome_path = new_path
+                jerome_path_index = 1  # Start from second point (first is current position)
+                jerome_target_x = target_x
+                jerome_target_y = target_y
+            else:
+                jerome_path = []
+                jerome_path_index = 0
+        
+        # Follow the path
+        if jerome_path and jerome_path_index < len(jerome_path):
+            target_point = jerome_path[jerome_path_index]
+            dx = target_point[0] - jerome_x
+            dy = target_point[1] - jerome_y
+            distance = math.sqrt(dx**2 + dy**2)
             
-            # Check X collision for Jerome
-            jerome_rect = pygame.Rect(jerome_x, jerome_y, jerome_size, jerome_size)
-            for wall in rooms[jerome_room]['walls']:
-                if jerome_rect.colliderect(wall):
-                    jerome_x = old_jerome_x
-                    break
-            
-            for furniture in rooms[jerome_room]['furniture']:
-                if jerome_rect.colliderect(furniture['rect']):
-                    jerome_x = old_jerome_x
-                    break
-            
-            # Y-axis movement
-            if jerome_y < player_y:
-                jerome_y += current_speed
-            elif jerome_y > player_y:
-                jerome_y -= current_speed
-            
-            # Check Y collision
-            jerome_rect = pygame.Rect(jerome_x, jerome_y, jerome_size, jerome_size)
-            for wall in rooms[jerome_room]['walls']:
-                if jerome_rect.colliderect(wall):
-                    jerome_y = old_jerome_y
-                    break
-            
-            for furniture in rooms[jerome_room]['furniture']:
-                if jerome_rect.colliderect(furniture['rect']):
-                    jerome_y = old_jerome_y
-                    break
+            if distance < current_speed * 2:
+                # Reached this waypoint, move to next
+                jerome_path_index += 1
+            else:
+                # Move towards waypoint
+                jerome_x += (dx / distance) * current_speed
+                jerome_y += (dy / distance) * current_speed
+        
+        # Update Jerome sprite position
+        jerome_sprite.rect.topleft = (jerome_x, jerome_y)
         
         # Collision check with player (damage when touched)
         if jerome_room == current_room:
             jerome_rect = pygame.Rect(jerome_x, jerome_y, jerome_size, jerome_size)
             
-            # Update Jerome sprite position
-            jerome_sprite.rect.topleft = (jerome_x, jerome_y)
-            
-            # Check if Jerome caught the player (only when angry with flog)
+            # Check if Jerome caught the player (only when angry)
             if player_rect.colliderect(jerome_rect) and jerome_state == "angry":
                 # Create explosion particles
                 for _ in range(30):
@@ -1175,63 +1229,156 @@ while running:
                 walls = rooms[current_room]['walls']
                 transitions = rooms[current_room]['transitions']
                 player_sprite.rect.topleft = (player_x, player_y)
-        else:
-            # Jerome tries to follow player to their room through doorways
-            # Check if Jerome can transition to follow player
-            for transition_rect, destination_room, spawn_x, spawn_y in rooms[jerome_room]['transitions']:
-                jerome_transition_rect = pygame.Rect(jerome_x, jerome_y, jerome_size, jerome_size)
-                if jerome_transition_rect.colliderect(transition_rect) and destination_room == current_room:
-                    # Jerome follows through the door
-                    jerome_room = destination_room
-                    # Ensure spawn position is valid
-                    jerome_x = max(30, min(width - 50, spawn_x))
-                    jerome_y = max(30, min(height - 50, spawn_y))
-                    break
-            
-            # Move Jerome towards the transition that leads to player's room
-            for transition_rect, destination_room, _, _ in rooms[jerome_room]['transitions']:
-                if destination_room == current_room:
-                    # Move towards this transition
-                    transition_center_x = transition_rect.centerx
-                    transition_center_y = transition_rect.centery
-                    
-                    if jerome_x < transition_center_x:
-                        jerome_x += current_speed
-                    elif jerome_x > transition_center_x:
-                        jerome_x -= current_speed
-                    
-                    # Check X collision
-                    jerome_rect = pygame.Rect(jerome_x, jerome_y, jerome_size, jerome_size)
-                    for wall in rooms[jerome_room]['walls']:
-                        if jerome_rect.colliderect(wall):
-                            jerome_x = old_jerome_x
-                            break
-                    
-                    for furniture in rooms[jerome_room]['furniture']:
-                        if jerome_rect.colliderect(furniture['rect']):
-                            jerome_x = old_jerome_x
-                            break
-                    
-                    if jerome_y < transition_center_y:
-                        jerome_y += current_speed
-                    elif jerome_y > transition_center_y:
-                        jerome_y -= current_speed
-                    
-                    # Check Y collision
-                    jerome_rect = pygame.Rect(jerome_x, jerome_y, jerome_size, jerome_size)
-                    for wall in rooms[jerome_room]['walls']:
-                        if jerome_rect.colliderect(wall):
-                            jerome_y = old_jerome_y
-                            break
-                    
-                    for furniture in rooms[jerome_room]['furniture']:
-                        if jerome_rect.colliderect(furniture['rect']):
-                            jerome_y = old_jerome_y
-                            break
-                    break
+        
+        # Check for room transitions when Jerome reaches a doorway
+        jerome_rect = pygame.Rect(jerome_x, jerome_y, jerome_size, jerome_size)
+        for transition_rect, destination_room, spawn_x, spawn_y in rooms[jerome_room]['transitions']:
+            if jerome_rect.colliderect(transition_rect):
+                # Jerome transitions through the door
+                jerome_room = destination_room
+                jerome_x = spawn_x
+                jerome_y = spawn_y
+                jerome_path = []  # Clear path when changing rooms
+                jerome_path_index = 0
+                break
     
     # Update particles
     particles[:] = [p for p in particles if p.update()]
+    
+    # ============ JONATHAN AI - Pathfinding-based Patrol ============
+    if jonathan_active:
+        # Update Jonathan's animation
+        jonathan_sprite.update_animation()
+        
+        # Determine behavior based on state
+        if jonathan_state == "chasing_egg" and has_egg:
+            # Chase the player to steal the egg!
+            current_speed = jonathan_chase_speed
+            target_x, target_y = player_x, player_y
+            
+            # Clear path more frequently when chasing to stay updated
+            if jonathan_room == current_room:
+                # Same room - recalculate path frequently to follow player
+                if not jonathan_path or jonathan_path_index >= len(jonathan_path) or random.randint(0, 15) == 0:
+                    new_path = astar_pathfind(nav_grid, jonathan_room, jonathan_x, jonathan_y, target_x, target_y)
+                    if new_path and len(new_path) > 1:
+                        jonathan_path = new_path
+                        jonathan_path_index = 1
+                        jonathan_target_x = target_x
+                        jonathan_target_y = target_y
+            else:
+                # Different room - navigate to the doorway that leads to player's room
+                if not jonathan_path or jonathan_path_index >= len(jonathan_path):
+                    # Find the correct doorway that connects to player's room
+                    doorway_found = False
+                    for transition_rect, dest_room, spawn_x, spawn_y in rooms[jonathan_room]['transitions']:
+                        if dest_room == current_room:
+                            # This doorway leads directly to player's room
+                            target_x, target_y = transition_rect.centerx, transition_rect.centery
+                            new_path = astar_pathfind(nav_grid, jonathan_room, jonathan_x, jonathan_y, target_x, target_y)
+                            if new_path and len(new_path) > 1:
+                                jonathan_path = new_path
+                                jonathan_path_index = 1
+                                doorway_found = True
+                            break
+                    
+                    # If no direct doorway, just pick the first available (multi-room pathfinding)
+                    if not doorway_found and rooms[jonathan_room]['transitions']:
+                        transition_rect, dest_room, spawn_x, spawn_y = rooms[jonathan_room]['transitions'][0]
+                        target_x, target_y = transition_rect.centerx, transition_rect.centery
+                        new_path = astar_pathfind(nav_grid, jonathan_room, jonathan_x, jonathan_y, target_x, target_y)
+                        if new_path and len(new_path) > 1:
+                            jonathan_path = new_path
+                            jonathan_path_index = 1
+        else:
+            # Normal patrol behavior
+            current_speed = jonathan_patrol_speed
+            
+            # Choose random destinations to patrol around
+            if not jonathan_path or jonathan_idle_timer <= 0:
+                # Pick a random walkable location in the current room or nearby room
+                if random.randint(0, 100) < 20 and rooms[jonathan_room]['transitions']:  # 20% chance to go to different room
+                    # Go to a random doorway to transition to another room
+                    transition_rect, dest_room, spawn_x, spawn_y = random.choice(rooms[jonathan_room]['transitions'])
+                    target_x, target_y = transition_rect.centerx, transition_rect.centery
+                else:
+                    # Stay in current room - pick random waypoint
+                    waypoints = patrol_waypoints.get(jonathan_room, [(width//2, height//2)])
+                    target_waypoint = random.choice(waypoints)
+                    target_x, target_y = target_waypoint
+                
+                jonathan_idle_timer = random.randint(180, 400)  # Wait before next destination
+            else:
+                jonathan_idle_timer -= 1
+                target_x = jonathan_target_x if jonathan_target_x else jonathan_x
+                target_y = jonathan_target_y if jonathan_target_y else jonathan_y
+            
+            # Generate new path if needed
+            if not jonathan_path or jonathan_path_index >= len(jonathan_path):
+                # Try to pathfind to target
+                new_path = astar_pathfind(nav_grid, jonathan_room, jonathan_x, jonathan_y, target_x, target_y)
+                if new_path and len(new_path) > 1:
+                    jonathan_path = new_path
+                    jonathan_path_index = 1  # Start from second point
+                    jonathan_target_x = target_x
+                    jonathan_target_y = target_y
+                else:
+                    jonathan_path = []
+                    jonathan_path_index = 0
+        
+        # Follow the path
+        if jonathan_path and jonathan_path_index < len(jonathan_path):
+            target_point = jonathan_path[jonathan_path_index]
+            dx = target_point[0] - jonathan_x
+            dy = target_point[1] - jonathan_y
+            distance = math.sqrt(dx**2 + dy**2)
+            
+            if distance < current_speed * 2:
+                # Reached this waypoint, move to next
+                jonathan_path_index += 1
+            else:
+                # Move towards waypoint
+                jonathan_x += (dx / distance) * current_speed
+                jonathan_y += (dy / distance) * current_speed
+        
+        # Update Jonathan sprite position
+        jonathan_sprite.rect.topleft = (jonathan_x, jonathan_y)
+        
+        # Check if Jonathan catches player with egg
+        if jonathan_state == "chasing_egg" and has_egg and jonathan_room == current_room:
+            jonathan_rect = pygame.Rect(jonathan_x, jonathan_y, jonathan_size, jonathan_size)
+            if player_rect.colliderect(jonathan_rect):
+                # Jonathan steals the egg!
+                has_egg = False
+                egg_held_time = 0
+                jonathan_state = "patrol"
+                warning_text = "Jonathan stole your egg!"
+                warning_timer = current_time
+                
+                # Visual feedback - egg particles
+                for _ in range(20):
+                    particles.append(Particle(
+                        player_x + player_size // 2,
+                        player_y + player_size // 2,
+                        (255, 255, 100),
+                        lifetime=40,
+                        vel_x=random.uniform(-3, 3),
+                        vel_y=random.uniform(-3, 3),
+                        size=random.randint(2, 5)
+                    ))
+        
+        # Check for room transitions when Jonathan reaches a doorway
+        jonathan_rect = pygame.Rect(jonathan_x, jonathan_y, jonathan_size, jonathan_size)
+        for transition_rect, destination_room, spawn_x, spawn_y in rooms[jonathan_room]['transitions']:
+            if jonathan_rect.colliderect(transition_rect):
+                # Jonathan transitions through the door
+                jonathan_room = destination_room
+                jonathan_x = spawn_x
+                jonathan_y = spawn_y
+                jonathan_path = []  # Clear path when changing rooms
+                jonathan_path_index = 0
+                jonathan_idle_timer = 0  # Pick new destination immediately
+                break
     
     # Check for room transitions (only in walk mode)
     if game_mode == "walk":
@@ -1298,6 +1445,56 @@ while running:
             pygame.draw.rect(drain_bg, (0, 0, 0, 180), drain_bg.get_rect(), border_radius=5)
             drain_bg.blit(drain_text, (5, 3))
             screen.blit(drain_bg, (width - drain_bg.get_width() - 10, height - 120))
+        
+        # Fridge Display (Jerome mechanic)
+        fridge_font = pygame.font.Font(None, 30)
+        fridge_color = GREEN if fridge_level > 50 else YELLOW if fridge_level > 20 else RED
+        fridge_text = fridge_font.render(f"FRIDGE: {int(fridge_level)}%", True, fridge_color)
+        fridge_bg = pygame.Surface((fridge_text.get_width() + 10, fridge_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(fridge_bg, (0, 0, 0, 180), fridge_bg.get_rect(), border_radius=5)
+        fridge_bg.blit(fridge_text, (5, 3))
+        screen.blit(fridge_bg, (10, height - 50))
+        
+        # Game Time Display (FNAF-style clock)
+        time_font = pygame.font.Font(None, 36)
+        minutes = int(game_time // 60)
+        seconds = int(game_time % 60)
+        time_text = time_font.render(f"{minutes}:{seconds:02d}", True, WHITE)
+        time_bg = pygame.Surface((time_text.get_width() + 10, time_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(time_bg, (0, 0, 0, 180), time_bg.get_rect(), border_radius=5)
+        time_bg.blit(time_text, (5, 3))
+        screen.blit(time_bg, (width // 2 - time_bg.get_width() // 2, 10))
+        
+        # Egg Inventory Display
+        egg_font = pygame.font.Font(None, 28)
+        egg_status = "EGG: YES" if has_egg else "EGG: NO"
+        
+        # Change color based on chase status
+        if has_egg and jonathan_state == "chasing_egg":
+            egg_color = RED  # Red when Jonathan is chasing
+        elif has_egg:
+            egg_color = YELLOW if egg_held_time > egg_chase_threshold * 0.7 else GREEN  # Yellow as warning
+        else:
+            egg_color = RED
+            
+        egg_text = egg_font.render(egg_status, True, egg_color)
+        egg_bg = pygame.Surface((egg_text.get_width() + 10, egg_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(egg_bg, (0, 0, 0, 180), egg_bg.get_rect(), border_radius=5)
+        egg_bg.blit(egg_text, (5, 3))
+        screen.blit(egg_bg, (10, height - 90))
+        
+        # Show timer when holding egg
+        if has_egg:
+            time_remaining = max(0, egg_chase_threshold - egg_held_time)
+            timer_font = pygame.font.Font(None, 20)
+            if jonathan_state == "chasing_egg":
+                timer_text = timer_font.render("JONATHAN CHASING!", True, RED)
+            else:
+                timer_text = timer_font.render(f"Time: {int(time_remaining)}s", True, egg_color)
+            timer_bg = pygame.Surface((timer_text.get_width() + 10, timer_text.get_height() + 6), pygame.SRCALPHA)
+            pygame.draw.rect(timer_bg, (0, 0, 0, 180), timer_bg.get_rect(), border_radius=5)
+            timer_bg.blit(timer_text, (5, 3))
+            screen.blit(timer_bg, (10, height - 120))
     
     elif game_mode == "camera":
         # Camera mode - show selected room with FNAF-style camera effect
@@ -1370,6 +1567,26 @@ while running:
         drain_text = status_font.render("DRAINING...", True, (255, 100, 100))
         screen.blit(drain_text, (width - 200, height - 75))
         
+        # Fridge Display in camera mode
+        fridge_font = pygame.font.Font(None, 24)
+        fridge_color = GREEN if fridge_level > 50 else YELLOW if fridge_level > 20 else RED
+        fridge_text = fridge_font.render(f"FRIDGE: {int(fridge_level)}%", True, fridge_color)
+        screen.blit(fridge_text, (60, height - 40))
+        
+        # Egg Inventory in camera mode
+        egg_font = pygame.font.Font(None, 24)
+        egg_status = "EGG: YES" if has_egg else "EGG: NO"
+        egg_color = GREEN if has_egg else RED
+        egg_text = egg_font.render(egg_status, True, egg_color)
+        screen.blit(egg_text, (60, height - 20))
+        
+        # Game Time Display
+        time_font = pygame.font.Font(None, 28)
+        minutes = int(game_time // 60)
+        seconds = int(game_time % 60)
+        time_text = time_font.render(f"TIME: {minutes}:{seconds:02d}", True, WHITE)
+        screen.blit(time_text, (width // 2 - time_text.get_width() // 2, 30))
+        
         # Camera indicator boxes
         for i in range(3):
             box_x = width - 150
@@ -1397,6 +1614,29 @@ while running:
                     deco_font = pygame.font.Font(None, 14)
                     deco_text = deco_font.render(deco['label'], True, WHITE)
                     screen.blit(deco_text, (deco['rect'].centerx - deco_text.get_width() // 2, deco['rect'].y - 12))
+        
+        # Show hints for breakroom interactions
+        if current_room == 2:  # Breakroom
+            table_rect = pygame.Rect(width // 2 - 150, height // 2 - 40, 300, 80)
+            fridge_rect = pygame.Rect(width // 2 + 170, height // 2 - 50, 60, 100)
+            player_rect = pygame.Rect(player_x, player_y, player_size, player_size)
+            hint_font = pygame.font.Font(None, 20)
+            
+            # Show fridge restock hint at the broken fridge
+            if player_rect.colliderect(fridge_rect.inflate(60, 60)) and fridge_level < 100:
+                hint_text = hint_font.render("E - Restock Fridge", True, (100, 200, 255))
+                hint_bg = pygame.Surface((hint_text.get_width() + 10, hint_text.get_height() + 6), pygame.SRCALPHA)
+                pygame.draw.rect(hint_bg, (0, 0, 0, 180), hint_bg.get_rect(), border_radius=5)
+                hint_bg.blit(hint_text, (5, 3))
+                screen.blit(hint_bg, (fridge_rect.centerx - hint_bg.get_width() // 2, fridge_rect.y - 50))
+            
+            # Show egg pickup hint at the table
+            if player_rect.colliderect(table_rect.inflate(60, 60)) and not has_egg:
+                hint_text = hint_font.render("E - Pick up Egg", True, (255, 255, 100))
+                hint_bg = pygame.Surface((hint_text.get_width() + 10, hint_text.get_height() + 6), pygame.SRCALPHA)
+                pygame.draw.rect(hint_bg, (0, 0, 0, 180), hint_bg.get_rect(), border_radius=5)
+                hint_bg.blit(hint_text, (5, 3))
+                screen.blit(hint_bg, (table_rect.centerx - hint_bg.get_width() // 2, table_rect.y - 50))
         
         # Draw furniture sprites for current room
         for furn_sprite in furniture_sprites:
@@ -1427,8 +1667,58 @@ while running:
                 # Draw furniture sprite
                 screen.blit(furn_sprite.image, furn_sprite.rect)
                 
-                # Draw label if exists
-                if furn_sprite.label:
+                # Special rendering for the Fridge in breakroom
+                if furn_sprite.label == "Broken" and current_room == 2:
+                    # Draw glowing fridge effect
+                    fridge_glow_color = (150, 200, 255) if fridge_level > 50 else (255, 200, 100) if fridge_level > 20 else (255, 100, 100)
+                    glow_surf, glow_pos = create_glow_effect(
+                        furn_sprite.rect.centerx, furn_sprite.rect.centery,
+                        40, fridge_glow_color, 80
+                    )
+                    screen.blit(glow_surf, glow_pos)
+                    
+                    # Draw fridge interior glow (simulating open door with light)
+                    interior_glow = pygame.Surface((furn_sprite.rect.width - 10, furn_sprite.rect.height - 10), pygame.SRCALPHA)
+                    pygame.draw.rect(interior_glow, (*fridge_glow_color, 120), interior_glow.get_rect(), border_radius=5)
+                    screen.blit(interior_glow, (furn_sprite.rect.x + 5, furn_sprite.rect.y + 5))
+                    
+                    # Draw shelves/items inside
+                    item_colors = [(255, 100, 100), (100, 255, 100), (100, 200, 255), (255, 255, 100)]
+                    shelf_y_positions = [20, 40, 60, 80]
+                    for i, shelf_y in enumerate(shelf_y_positions):
+                        if i < len(item_colors):
+                            # Draw small food items on shelves
+                            item_x = furn_sprite.rect.x + 15 + (i % 2) * 20
+                            pygame.draw.rect(screen, item_colors[i], 
+                                           (item_x, furn_sprite.rect.y + shelf_y, 12, 8), border_radius=2)
+                    
+                    # Draw "FRIDGE" label on top
+                    fridge_font = pygame.font.Font(None, 22)
+                    fridge_text = fridge_font.render("FRIDGE", True, WHITE)
+                    fridge_text_bg = pygame.Surface((fridge_text.get_width() + 8, fridge_text.get_height() + 4), pygame.SRCALPHA)
+                    pygame.draw.rect(fridge_text_bg, (0, 0, 0, 200), fridge_text_bg.get_rect(), border_radius=4)
+                    fridge_text_bg.blit(fridge_text, (4, 2))
+                    screen.blit(fridge_text_bg, (furn_sprite.rect.centerx - fridge_text_bg.get_width() // 2, 
+                                                 furn_sprite.rect.y - 25))
+                    
+                    # Show fill level bar above fridge
+                    bar_width = 50
+                    bar_height = 8
+                    bar_x = furn_sprite.rect.centerx - bar_width // 2
+                    bar_y = furn_sprite.rect.y - 45
+                    
+                    # Background
+                    pygame.draw.rect(screen, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height), border_radius=3)
+                    # Fill
+                    fill_width = int(bar_width * (fridge_level / 100))
+                    fill_color = GREEN if fridge_level > 50 else YELLOW if fridge_level > 20 else RED
+                    if fill_width > 0:
+                        pygame.draw.rect(screen, fill_color, (bar_x, bar_y, fill_width, bar_height), border_radius=3)
+                    # Border
+                    pygame.draw.rect(screen, (200, 200, 200), (bar_x, bar_y, bar_width, bar_height), 2, border_radius=3)
+                
+                # Draw label if exists (for non-fridge items)
+                elif furn_sprite.label and furn_sprite.label != "Broken":
                     font = pygame.font.Font(None, 16)
                     text = font.render(furn_sprite.label, True, WHITE)
                     text_rect = text.get_rect(center=furn_sprite.rect.center)
@@ -1449,44 +1739,7 @@ while running:
             )
             screen.blit(glow_surf, glow_pos)
         
-        # Draw dynamic supply stations
-        for supply in active_supplies:
-            if supply['room'] == current_room:
-                supply_rect = pygame.Rect(supply['x'], supply['y'], 50, 50)
-                
-                # Draw supply box
-                pygame.draw.rect(screen, supply['color'], supply_rect)
-                pygame.draw.rect(screen, (0, 0, 0), supply_rect, 2)
-                
-                # Draw glowing border when snacks are low
-                if snacks_stocked < snacks_needed:
-                    border_color = (255, 215, 0)  # Gold
-                    pygame.draw.rect(screen, border_color, supply_rect, 4)
-                    
-                    # Strong glow
-                    glow_surf, glow_pos = create_glow_effect(
-                        supply_rect.centerx, supply_rect.centery,
-                        30, border_color, 120
-                    )
-                    screen.blit(glow_surf, glow_pos)
-                
-                # Draw "SNACK" label
-                label_font = pygame.font.Font(None, 18)
-                label_text = label_font.render("SNACK", True, WHITE)
-                label_rect = label_text.get_rect(center=supply_rect.center)
-                bg_rect = label_rect.inflate(6, 4)
-                pygame.draw.rect(screen, (0, 0, 0, 200), bg_rect, border_radius=3)
-                screen.blit(label_text, label_rect)
-                
-                # Show pickup hint when player is nearby
-                player_rect = pygame.Rect(player_x, player_y, player_size, player_size)
-                if not carrying_snack and player_rect.colliderect(supply_rect.inflate(50, 50)):
-                    hint_font = pygame.font.Font(None, 22)
-                    hint_text = hint_font.render("Press E to pick up", True, YELLOW)
-                    hint_bg = pygame.Surface((hint_text.get_width() + 10, hint_text.get_height() + 6), pygame.SRCALPHA)
-                    pygame.draw.rect(hint_bg, (0, 0, 0, 180), hint_bg.get_rect(), border_radius=5)
-                    hint_bg.blit(hint_text, (5, 3))
-                    screen.blit(hint_bg, (supply_rect.centerx - hint_bg.get_width() // 2, supply_rect.y - 35))
+
         
         # Draw particles
         for particle in particles:
@@ -1537,13 +1790,106 @@ while running:
             name_bg.blit(name_text, (4, 2))
             screen.blit(name_bg, (jerome_x - 5, jerome_y - 25))
         
+        # Draw Jonathan if active (only if in the same room as player)
+        if jonathan_active and jonathan_room == current_room:
+            # Draw Jonathan's shadow
+            shadow_pos = (jonathan_x + 4, jonathan_y + jonathan_size)
+            screen.blit(jonathan_sprite.shadow, shadow_pos)
+            
+            # Draw friendly blue glow around Jonathan
+            glow_surf, glow_pos = create_glow_effect(
+                jonathan_x + jonathan_size // 2, jonathan_y + jonathan_size // 2,
+                40, (20, 100, 120), 100
+            )
+            screen.blit(glow_surf, glow_pos)
+            
+            # Draw Jonathan sprite
+            screen.blit(jonathan_sprite.image, jonathan_sprite.rect)
+            
+            # Draw Jonathan's title
+            font_small = pygame.font.Font(None, 20)
+            name_text = font_small.render("Jonathan", True, (150, 200, 210))
+            name_bg = pygame.Surface((name_text.get_width() + 8, name_text.get_height() + 4), pygame.SRCALPHA)
+            pygame.draw.rect(name_bg, (20, 60, 80, 200), name_bg.get_rect(), border_radius=4)
+            name_bg.blit(name_text, (4, 2))
+            screen.blit(name_bg, (jonathan_x - 10, jonathan_y - 25))
+            
+            # Draw joke speech bubble above Jonathan if joke is available
+            if jonathan_joke_text:
+                joke_font = pygame.font.Font(None, 18)
+                max_width = 300
+                
+                # Word wrap the joke
+                words = jonathan_joke_text.split(' ')
+                lines = []
+                current_line = ""
+                for word in words:
+                    test_line = current_line + word + " "
+                    if joke_font.size(test_line)[0] < max_width:
+                        current_line = test_line
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                        current_line = word + " "
+                if current_line:
+                    lines.append(current_line)
+                
+                # Limit to 4 lines
+                lines = lines[:4]
+                
+                # Calculate bubble size
+                line_height = 20
+                bubble_height = len(lines) * line_height + 20
+                bubble_width = max_width + 20
+                
+                # Draw speech bubble
+                bubble_x = jonathan_x + jonathan_size // 2 - bubble_width // 2
+                bubble_y = jonathan_y - bubble_height - 35
+                
+                # Make sure bubble stays on screen
+                bubble_x = max(10, min(bubble_x, width - bubble_width - 10))
+                bubble_y = max(10, bubble_y)
+                
+                # Draw bubble background
+                bubble_surf = pygame.Surface((bubble_width, bubble_height), pygame.SRCALPHA)
+                pygame.draw.rect(bubble_surf, (240, 240, 255, 230), bubble_surf.get_rect(), border_radius=10)
+                pygame.draw.rect(bubble_surf, (100, 150, 200), bubble_surf.get_rect(), 2, border_radius=10)
+                
+                # Draw text lines
+                for i, line in enumerate(lines):
+                    text_surf = joke_font.render(line.strip(), True, (20, 20, 50))
+                    bubble_surf.blit(text_surf, (10, 10 + i * line_height))
+                
+                screen.blit(bubble_surf, (bubble_x, bubble_y))
+                
+                # Draw bubble pointer (triangle pointing to Jonathan)
+                pointer_points = [
+                    (jonathan_x + jonathan_size // 2, jonathan_y - 30),
+                    (jonathan_x + jonathan_size // 2 - 10, bubble_y + bubble_height),
+                    (jonathan_x + jonathan_size // 2 + 10, bubble_y + bubble_height)
+                ]
+                pygame.draw.polygon(screen, (240, 240, 255), pointer_points)
+                pygame.draw.polygon(screen, (100, 150, 200), pointer_points, 2)
+        
         # Draw MMO-style UI
         draw_mmo_ui(screen, current_time)
         
         # Walk mode instructions
         walk_inst_font = pygame.font.Font(None, 18)
-        walk_text = walk_inst_font.render("ESC/C - Cameras | SHIFT - Sprint | E - Pickup/Deliver", True, (180, 180, 180))
+        if current_room == 0:
+            walk_text = walk_inst_font.render("ESC/C - Return to Desk | SHIFT - Sprint | E - Interact", True, (180, 180, 180))
+        else:
+            walk_text = walk_inst_font.render("Return to your office to access desk | SHIFT - Sprint | E - Interact", True, (180, 180, 180))
         screen.blit(walk_text, (10, height - 25))
+        
+        # Room indicator
+        room_names = {0: "Your Office", 1: "Hallway", 2: "Break Room"}
+        room_name_font = pygame.font.Font(None, 24)
+        room_name_text = room_name_font.render(f"Location: {room_names[current_room]}", True, (200, 200, 220))
+        room_name_bg = pygame.Surface((room_name_text.get_width() + 10, room_name_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(room_name_bg, (0, 0, 0, 180), room_name_bg.get_rect(), border_radius=5)
+        room_name_bg.blit(room_name_text, (5, 3))
+        screen.blit(room_name_bg, (10, 45))
         
         # WIFI Display in walk mode
         wifi_font = pygame.font.Font(None, 28)
@@ -1553,6 +1899,35 @@ while running:
         pygame.draw.rect(wifi_bg, (0, 0, 0, 180), wifi_bg.get_rect(), border_radius=5)
         wifi_bg.blit(wifi_text, (5, 3))
         screen.blit(wifi_bg, (width - wifi_bg.get_width() - 10, 10))
+        
+        # Fridge Display in walk mode
+        fridge_font = pygame.font.Font(None, 26)
+        fridge_color = GREEN if fridge_level > 50 else YELLOW if fridge_level > 20 else RED
+        fridge_text = fridge_font.render(f"FRIDGE: {int(fridge_level)}%", True, fridge_color)
+        fridge_bg = pygame.Surface((fridge_text.get_width() + 10, fridge_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(fridge_bg, (0, 0, 0, 180), fridge_bg.get_rect(), border_radius=5)
+        fridge_bg.blit(fridge_text, (5, 3))
+        screen.blit(fridge_bg, (width - fridge_bg.get_width() - 10, 45))
+        
+        # Egg Inventory in walk mode
+        egg_font = pygame.font.Font(None, 26)
+        egg_status = "EGG: YES" if has_egg else "EGG: NO"
+        egg_color = GREEN if has_egg else RED
+        egg_text = egg_font.render(egg_status, True, egg_color)
+        egg_bg = pygame.Surface((egg_text.get_width() + 10, egg_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(egg_bg, (0, 0, 0, 180), egg_bg.get_rect(), border_radius=5)
+        egg_bg.blit(egg_text, (5, 3))
+        screen.blit(egg_bg, (width - egg_bg.get_width() - 10, 80))
+        
+        # Game Time Display in walk mode
+        time_font = pygame.font.Font(None, 30)
+        minutes = int(game_time // 60)
+        seconds = int(game_time % 60)
+        time_text = time_font.render(f"{minutes}:{seconds:02d}", True, WHITE)
+        time_bg = pygame.Surface((time_text.get_width() + 10, time_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(time_bg, (0, 0, 0, 180), time_bg.get_rect(), border_radius=5)
+        time_bg.blit(time_text, (5, 3))
+        screen.blit(time_bg, (10, 10))
     
     # Draw objective text (big and clear)
     if game_mode != "tutorial":
@@ -1566,52 +1941,6 @@ while running:
         objective_x = width // 2 - objective_bg.get_width() // 2
         objective_y = height - 80
         screen.blit(objective_bg, (objective_x, objective_y))
-        
-        # Draw ChatGPT Jokes on the right side
-        joke_font = pygame.font.Font(None, 20)
-        joke_title_font = pygame.font.Font(None, 24)
-        
-        # Title
-        joke_title = joke_title_font.render("ChatGPT Joke:", True, (255, 215, 100))
-        
-        # Wrap joke text to fit in box
-        joke_box_width = 280
-        wrapped_lines = []
-        words = joke_text.split(' ')
-        current_line = ""
-        
-        for word in words:
-            test_line = current_line + word + " "
-            if joke_font.size(test_line)[0] < joke_box_width - 20:
-                current_line = test_line
-            else:
-                if current_line:
-                    wrapped_lines.append(current_line)
-                current_line = word + " "
-        if current_line:
-            wrapped_lines.append(current_line)
-        
-        # Calculate box height based on lines
-        line_height = 22
-        joke_box_height = 60 + len(wrapped_lines) * line_height
-        
-        # Draw joke box on right side
-        joke_box_x = width - joke_box_width - 20
-        joke_box_y = 80
-        
-        joke_bg = pygame.Surface((joke_box_width, joke_box_height), pygame.SRCALPHA)
-        pygame.draw.rect(joke_bg, (40, 20, 60, 230), joke_bg.get_rect(), border_radius=8)
-        pygame.draw.rect(joke_bg, (180, 150, 200), joke_bg.get_rect(), 2, border_radius=8)
-        
-        # Blit title
-        joke_bg.blit(joke_title, (joke_box_width // 2 - joke_title.get_width() // 2, 10))
-        
-        # Blit wrapped joke lines
-        for i, line in enumerate(wrapped_lines):
-            line_surface = joke_font.render(line.strip(), True, (220, 220, 220))
-            joke_bg.blit(line_surface, (10, 40 + i * line_height))
-        
-        screen.blit(joke_bg, (joke_box_x, joke_box_y))
     
     # Tutorial screen
     if game_mode == "tutorial":
@@ -1640,18 +1969,18 @@ while running:
             "",
             "HOW TO PLAY:",
             "",
-            "• Keep the Break Room table stocked with 5 snacks",
-            "• Pick up snacks from supply stations (Press E)",
-            "• Place them on the Break Room table (Press E)",
-            "• Jerome eats snacks over time - keep restocking!",
-            "• If snacks run low, Jerome loses patience",
-            "• When patience hits 0%, Jerome gets ANGRY with his clipboard!",
+            "• Survive 5 minutes to win!",
+            "• Keep the FRIDGE stocked (go to Breakroom, press E)",
+            "• Get an EGG for defense (Breakroom table, press E)",
+            "• WIFI drains when working or viewing cameras",
+            "• Time only moves when in office (working/slacking)",
             "",
             "CONTROLS:",
-            "• WASD/Arrows - Move",
-            "• SHIFT - Sprint (uses stamina)",
-            "• C/ESC - Toggle Cameras",
-            "• E - Pickup/Stock snacks",
+            "• S - Toggle Work/Slack in office",
+            "• SPACE/C - Open/Close Cameras",
+            "• W - Walk Mode (to restock/get egg)",
+            "• WASD/Arrows - Move (walk mode)",
+            "• E - Restock/Pickup (walk mode)",
             "",
             "Press SPACE to start your shift!"
         ]
@@ -1672,8 +2001,63 @@ while running:
         flash_surface.set_alpha(flash_alpha)
         screen.blit(flash_surface, (0, 0))
     
+    # Game Over Screen
+    if game_state == "game_over":
+        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, (0, 0, 0, 200), overlay.get_rect())
+        screen.blit(overlay, (0, 0))
+        
+        game_over_font = pygame.font.Font(None, 72)
+        game_over_text = game_over_font.render("GAME OVER", True, RED)
+        screen.blit(game_over_text, (width // 2 - game_over_text.get_width() // 2, height // 2 - 100))
+        
+        reason_font = pygame.font.Font(None, 36)
+        if wifi <= 0:
+            reason = "WIFI ran out!"
+        elif fridge_level <= 0:
+            reason = "Jerome got you! (Fridge empty)"
+        else:
+            reason = "You died!"
+        reason_text = reason_font.render(reason, True, WHITE)
+        screen.blit(reason_text, (width // 2 - reason_text.get_width() // 2, height // 2))
+        
+        # Stats
+        stats_font = pygame.font.Font(None, 28)
+        minutes = int(game_time // 60)
+        seconds = int(game_time % 60)
+        survived_text = stats_font.render(f"Survived: {minutes}:{seconds:02d}", True, WHITE)
+        screen.blit(survived_text, (width // 2 - survived_text.get_width() // 2, height // 2 + 60))
+        
+        restart_font = pygame.font.Font(None, 24)
+        restart_text = restart_font.render("Close and restart to try again", True, (180, 180, 180))
+        screen.blit(restart_text, (width // 2 - restart_text.get_width() // 2, height // 2 + 120))
+    
+    # Win Screen
+    elif game_state == "win":
+        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        pygame.draw.rect(overlay, (0, 50, 0, 200), overlay.get_rect())
+        screen.blit(overlay, (0, 0))
+        
+        win_font = pygame.font.Font(None, 72)
+        win_text = win_font.render("YOU WIN!", True, (100, 255, 100))
+        screen.blit(win_text, (width // 2 - win_text.get_width() // 2, height // 2 - 100))
+        
+        congrats_font = pygame.font.Font(None, 36)
+        congrats_text = congrats_font.render("You survived the shift!", True, WHITE)
+        screen.blit(congrats_text, (width // 2 - congrats_text.get_width() // 2, height // 2))
+        
+        stats_font = pygame.font.Font(None, 28)
+        stats_lines = [
+            f"WIFI Remaining: {int(wifi)}%",
+            f"Fridge Level: {int(fridge_level)}%",
+            f"Had Egg: {'Yes' if has_egg else 'No'}"
+        ]
+        for i, line in enumerate(stats_lines):
+            stat_text = stats_font.render(line, True, WHITE)
+            screen.blit(stat_text, (width // 2 - stat_text.get_width() // 2, height // 2 + 60 + i * 35))
+    
     # Warning text
-    if warning_text and (current_time - warning_timer) < 3000:
+    elif warning_text and (current_time - warning_timer) < 3000:
         warning_font = pygame.font.Font(None, 28)
         warning_surface = warning_font.render(warning_text, True, (255, 200, 100))
         warning_bg = pygame.Surface((warning_surface.get_width() + 20, 40))
@@ -1682,15 +2066,7 @@ while running:
         screen.blit(warning_bg, (width // 2 - warning_surface.get_width() // 2 - 10, height - 130))
         screen.blit(warning_surface, (width // 2 - warning_surface.get_width() // 2, height - 125))
     
-    # Show carrying indicator
-    if carrying_snack:
-        carry_font = pygame.font.Font(None, 24)
-        carry_text = carry_font.render("Carrying: Snack", True, (255, 200, 100))
-        carry_bg = pygame.Surface((carry_text.get_width() + 20, 35), pygame.SRCALPHA)
-        pygame.draw.rect(carry_bg, (50, 50, 60, 220), carry_bg.get_rect(), border_radius=5)
-        pygame.draw.rect(carry_bg, (255, 200, 100), carry_bg.get_rect(), 2, border_radius=5)
-        carry_bg.blit(carry_text, (10, 7))
-        screen.blit(carry_bg, (width // 2 - carry_bg.get_width() // 2, 20))
+
     
     # Update the display
     pygame.display.flip()
