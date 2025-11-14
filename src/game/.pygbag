@@ -1,0 +1,9 @@
+# Pygbag Configuration for Five Nights at Rocket
+# This file contains metadata for the pygbag build system
+
+width = 1280
+height = 720
+title = "Nine to Five at Rocket"
+version = "1.0.0"
+icon = "favicon.png"
+orientation = "landscape"

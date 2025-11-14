@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nine to Five at Rocket</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 1280px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #ffd700;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #cccccc;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        
+        #game-container {
+            width: 100%;
+            max-width: 1280px;
+            aspect-ratio: 16 / 9;
+            margin: 0 auto;
+            border: 3px solid #ffd700;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.3);
+            background: #000000;
+        }
+        
+        #loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 1.2em;
+            color: #ffd700;
+        }
+        
+        .spinner {
+            border: 4px solid #333;
+            border-top: 4px solid #ffd700;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .controls {
+            margin-top: 20px;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .controls h3 {
+            color: #ffd700;
+            margin-top: 0;
+        }
+        
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .control-item {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #444;
+        }
+        
+        .key {
+            display: inline-block;
+            background: #333;
+            padding: 5px 10px;
+            border-radius: 3px;
+            border: 1px solid #555;
+            font-family: 'Courier New', monospace;
+            color: #ffd700;
+            margin: 0 3px;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #888;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            h1 {
+                font-size: 1.5em;
+            }
+            
+            .controls-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Nine to Five at Rocket</h1>
+        <p class="subtitle">Survive one workday from 9 AM to 5 PM!</p>
+        
+        <div id="game-container">
+            <div id="loading">
+                <div class="spinner"></div>
+                <p>Loading game...</p>
+            </div>
+            <!-- Pygbag will inject the game canvas here -->
+        </div>
+        
+        <div class="controls">
+            <h3>🎮 Game Controls</h3>
+            <div class="controls-grid">
+                <div class="control-item">
+                    <strong>Movement:</strong><br>
+                    <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> or Arrow Keys
+                </div>
+                <div class="control-item">
+                    <strong>Interact:</strong><br>
+                    <span class="key">E</span> - Use objects
+                </div>
+                <div class="control-item">
+                    <strong>Laptop:</strong><br>
+                    <span class="key">Y</span> - YouTube<br>
+                    <span class="key">C</span> - Code
+                </div>
+                <div class="control-item">
+                    <strong>Camera:</strong><br>
+                    <span class="key">1</span> <span class="key">2</span> <span class="key">3</span> <span class="key">4</span> - Switch views<br>
+                    <span class="key">ESC</span> - Close camera
+                </div>
+                <div class="control-item">
+                    <strong>Pause:</strong><br>
+                    <span class="key">P</span> or <span class="key">ESC</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© 2025 Rocket Software | Powered by Pygame & Pygbag</p>
+            <p>Best played in fullscreen mode | Press <span class="key">F11</span> for fullscreen</p>
+        </div>
+    </div>
+    
+    <script>
+        // Hide loading screen when game loads
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                const loading = document.getElementById('loading');
+                if (loading) {
+                    loading.style.display = 'none';
+                }
+            }, 2000);
+        });
+        
+        // Prevent context menu on right-click
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+        });
+        
+        // Focus game container on click
+        document.getElementById('game-container').addEventListener('click', function() {
+            this.focus();
+        });
+    </script>
+</body>
+</html>
