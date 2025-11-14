@@ -592,3 +592,152 @@ class NextGenIntern(Enemy):
             self.state = "idle"
         
         return old_x, old_y
+
+
+class Runnit(Enemy):
+    """
+    Runnit: A fast, unpredictable enemy that randomly sprints through rooms.
+    Only dangerous when sprinting. Uses hit-and-run tactics.
+    """
+    
+    def __init__(self, x: float, y: float):
+        """Initialize Runnit at meeting room position."""
+        super().__init__(x, y, 35, 35, (180, 50, 200), "Runnit")
+        self.speed = 40  # Normal speed
+        self.sprint_speed = 200  # Very fast when sprinting
+        self.is_sprinting = False
+        self.sprint_timer = 0
+        self.sprint_duration = 3.0  # Sprints for 3 seconds
+        self.sprint_cooldown = 0
+        self.sprint_cooldown_duration = 10.0  # 10 seconds between sprints
+        self.activation_delay = 20.0  # Wait 20 seconds before first sprint
+        self.home_pos = (x, y)  # Meeting room home position
+        self.sprint_target = None  # Where to sprint to
+        
+    def update(self, dt: float, player, rooms: Dict):
+        """
+        Update Runnit's AI.
+        
+        Args:
+            dt: Delta time (seconds)
+            player: Player object
+            rooms: Dictionary of room objects
+            
+        Returns:
+            Tuple of old (x, y) position for collision detection
+        """
+        old_x, old_y = self.x, self.y
+        
+        # Activation delay
+        if self.activation_delay > 0:
+            self.activation_delay -= dt
+            self.state = "idle"
+            return old_x, old_y
+        
+        # Update sprint cooldown
+        if self.sprint_cooldown > 0:
+            self.sprint_cooldown -= dt
+        
+        # Check if should start sprinting
+        if not self.is_sprinting and self.sprint_cooldown <= 0:
+            # Pick a random room to sprint to
+            import random
+            target_rooms = [RoomType.OFFICE, RoomType.HALLWAY, RoomType.CLASSROOM, RoomType.BREAK_ROOM]
+            target_room = random.choice(target_rooms)
+            target_room_obj = rooms.get(target_room)
+            
+            if target_room_obj:
+                # Pick random position in that room
+                self.sprint_target = (
+                    target_room_obj.x + target_room_obj.width // 2,
+                    target_room_obj.y + target_room_obj.height // 2
+                )
+                self.is_sprinting = True
+                self.sprint_timer = self.sprint_duration
+                self.state = "sprinting"
+        
+        # Sprinting behavior
+        if self.is_sprinting:
+            self.sprint_timer -= dt
+            
+            if self.sprint_timer <= 0:
+                # Sprint over, return home
+                self.is_sprinting = False
+                self.sprint_cooldown = self.sprint_cooldown_duration
+                self.sprint_target = self.home_pos
+                self.state = "returning_home"
+            else:
+                # Sprint towards target
+                if self.sprint_target:
+                    ex, ey = self.get_center()
+                    tx, ty = self.sprint_target
+                    
+                    dx = tx - ex
+                    dy = ty - ey
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    
+                    if dist > 10:
+                        dx /= dist
+                        dy /= dist
+                        
+                        # Use pathfinding
+                        current_room_obj = rooms.get(self.current_room)
+                        if current_room_obj:
+                            dx, dy = simple_pathfind((ex, ey), (tx, ty),
+                                                    current_room_obj.walls,
+                                                    current_room_obj.get_rect())
+                        
+                        self.x += dx * self.sprint_speed * dt
+                        self.y += dy * self.sprint_speed * dt
+                        
+                        if abs(dx) > abs(dy):
+                            self.direction = Direction.RIGHT if dx > 0 else Direction.LEFT
+                        else:
+                            self.direction = Direction.DOWN if dy > 0 else Direction.UP
+                    else:
+                        # Reached target, pick new target
+                        import random
+                        target_rooms = [RoomType.OFFICE, RoomType.HALLWAY, RoomType.CLASSROOM, RoomType.BREAK_ROOM]
+                        target_room = random.choice(target_rooms)
+                        target_room_obj = rooms.get(target_room)
+                        if target_room_obj:
+                            self.sprint_target = (
+                                target_room_obj.x + target_room_obj.width // 2,
+                                target_room_obj.y + target_room_obj.height // 2
+                            )
+        
+        # Returning home
+        elif self.state == "returning_home":
+            ex, ey = self.get_center()
+            hx, hy = self.home_pos
+            
+            dx = hx - ex
+            dy = hy - ey
+            dist = math.sqrt(dx * dx + dy * dy)
+            
+            if dist < 20:
+                # Back home, idle
+                self.state = "idle"
+            else:
+                dx /= dist
+                dy /= dist
+                
+                # Use pathfinding
+                current_room_obj = rooms.get(self.current_room)
+                if current_room_obj:
+                    dx, dy = simple_pathfind((ex, ey), (hx, hy),
+                                            current_room_obj.walls,
+                                            current_room_obj.get_rect())
+                
+                self.x += dx * self.speed * dt
+                self.y += dy * self.speed * dt
+                
+                if abs(dx) > abs(dy):
+                    self.direction = Direction.RIGHT if dx > 0 else Direction.LEFT
+                else:
+                    self.direction = Direction.DOWN if dy > 0 else Direction.UP
+        else:
+            # Idle at home
+            self.state = "idle"
+        
+        return old_x, old_y

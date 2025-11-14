@@ -109,6 +109,7 @@ def create_enemy_sprite(width: int, height: int, color: Tuple[int, int, int], st
         "Jo-nathan": "Jo-nathan.png",
         "Jeromathy": "Jeromathy.png",
         "Angellica": "Angellica.png",
+        "Runnit": "runnit.png",
         "NextGen Intern": f"NextGen_intern_{intern_id}.png"
     }
     

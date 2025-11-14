@@ -16,9 +16,10 @@ from constants import *
 from sprites import create_player_sprite, create_enemy_sprite, create_interactable_sprite, create_name_tag
 from particles import Particle, ParticleSystem
 from entities import Entity, Player
-from enemies import Enemy, Jonathan, Jeromathy, Angellica, NextGenIntern, simple_pathfind
+from enemies import Enemy, Jonathan, Jeromathy, Angellica, NextGenIntern, Runnit, simple_pathfind
 from interactable import Interactable
 from room import Room
+from ai_messages import get_ai_message_generator
 
 # Initialize Pygame
 pygame.init()
@@ -102,6 +103,10 @@ class Game:
         self.jumpscare_duration = 1.5  # Duration in seconds
         self.killer_enemy = None  # Track which enemy killed the player
         self.jumpscare_image = None
+        self.death_message = ""  # AI-generated death message
+        
+        # AI message generator
+        self.ai_generator = get_ai_message_generator()
         
         self._init_game()
     
@@ -309,6 +314,12 @@ class Game:
             intern3.current_room = RoomType.CLASSROOM
             intern3.activation_delay = 35.0  # Third intern activates at 35 seconds
             self.enemies.append(intern3)
+            
+            # Runnit in Meeting Room (center)
+            meeting_room = self.rooms[RoomType.MEETING_ROOM]
+            runnit = Runnit(meeting_room.x + meeting_room.width // 2, meeting_room.y + meeting_room.height // 2)
+            runnit.current_room = RoomType.MEETING_ROOM
+            self.enemies.append(runnit)
         else:
             # Reset enemy positions for new day
             intern_count = 0
@@ -359,6 +370,16 @@ class Game:
                     enemy.going_for_snack = False
                     enemy.returning_to_classroom = False
                     intern_count += 1
+                elif isinstance(enemy, Runnit):
+                    meeting_room = self.rooms[RoomType.MEETING_ROOM]
+                    enemy.x = meeting_room.x + meeting_room.width // 2
+                    enemy.y = meeting_room.y + meeting_room.height // 2
+                    enemy.current_room = RoomType.MEETING_ROOM
+                    enemy.activation_delay = 20.0
+                    enemy.is_sprinting = False
+                    enemy.sprint_timer = 0
+                    enemy.sprint_cooldown = 0
+                    enemy.state = "idle"
     
     def switch_state(self, new_state: GameState):
         self.state = new_state
@@ -515,6 +536,14 @@ class Game:
                         self.switch_state(GameState.GAME_OVER)
                         px, py = self.player.get_center()
                         self.particle_system.emit(px, py, RED, 30, 150, 2.0)
+                
+                # Runnit only kills when sprinting
+                elif isinstance(enemy, Runnit):
+                    if enemy.is_sprinting:
+                        self.trigger_jumpscare(enemy)
+                        self.switch_state(GameState.GAME_OVER)
+                        px, py = self.player.get_center()
+                        self.particle_system.emit(px, py, RED, 30, 150, 2.0)
     
     def update(self, dt: float):
         if self.state == GameState.MENU:
@@ -575,6 +604,12 @@ class Game:
         # Check victory condition
         if self.current_time >= self.target_time:
             if self.current_day >= self.max_days:
+                # Generate AI victory message
+                victory_context = {
+                    'time_survived': '9am to 5pm',
+                    'enemies_avoided': 'Jo-nathan, Jeromathy, Angellica',
+                }
+                self.death_message = self.ai_generator.generate_victory_message(victory_context)
                 self.switch_state(GameState.VICTORY)
             else:
                 self.current_day += 1
@@ -679,6 +714,10 @@ class Game:
                 result = enemy.update(dt, self.player, breakroom_center, self, self.rooms)
                 if result:
                     old_x, old_y = result
+            elif isinstance(enemy, Runnit):
+                result = enemy.update(dt, self.player, self.rooms)
+                if result:
+                    old_x, old_y = result
             
             # Check if enemy hit a wall in their room
             if old_x is not None and self.check_enemy_collision_with_walls(enemy):
@@ -773,16 +812,26 @@ class Game:
             self.switch_state(GameState.PLAYING)
     
     def trigger_jumpscare(self, enemy):
-        """Trigger a jumpscare with the given enemy's image"""
+        """Trigger a jumpscare with the given enemy's image and AI-generated message"""
         self.killer_enemy = enemy
         self.jumpscare_active = True
         self.jumpscare_timer = 0.0
         
+        # Generate AI-powered death message
+        context = {
+            'time': self._format_time(self.current_time),
+            'room': self.current_room.value,
+            'cause': self._determine_death_cause(enemy),
+        }
+        self.death_message = self.ai_generator.generate_jumpscare_message(enemy.name, context)
+        print(f"[Death] {enemy.name} killed player: {self.death_message}")
+        
         # Map enemy names to image files
         image_map = {
-            "Jo-nathan": "Jo-nathan.png",
+            "Jo-nathan": "jonathan_js.png",  # Special jumpscare image
             "Jeromathy": "Jeromathy.png",
-            "Angellica": "Angellica.png",
+            "Angellica": "angellica_js.png",  # Special jumpscare image
+            "Runnit": "runnit_js.png",  # Special jumpscare image
             "NextGen Intern": f"NextGen_intern_{getattr(enemy, 'intern_id', 1)}.png"
         }
         
@@ -791,15 +840,52 @@ class Game:
             try:
                 # Try relative path first (pygbag)
                 self.jumpscare_image = pygame.image.load(f'images/{image_file}').convert_alpha()
-            except:
+                print(f"[Jumpscare] Loaded image: images/{image_file}")
+            except Exception as e:
                 # Fallback to absolute path (desktop)
-                import os
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                image_path = os.path.join(current_dir, 'images', image_file)
-                self.jumpscare_image = pygame.image.load(image_path).convert_alpha()
+                try:
+                    import os
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    image_path = os.path.join(current_dir, 'images', image_file)
+                    self.jumpscare_image = pygame.image.load(image_path).convert_alpha()
+                    print(f"[Jumpscare] Loaded image: {image_path}")
+                except Exception as e2:
+                    print(f"[Jumpscare] ERROR: Failed to load image {image_file}: {e2}")
+                    self.jumpscare_image = None
+        else:
+            print(f"[Jumpscare] ERROR: No image mapping for enemy: {enemy.name}")
+            self.jumpscare_image = None
         
         # Play jumpscare sound effect (screen shake)
         self.screen_shake(30)
+    
+    def _format_time(self, time: float) -> str:
+        """Format game time as readable string"""
+        hours = int(time)
+        minutes = int((time - hours) * 60)
+        am_pm = "AM" if hours < 12 else "PM"
+        display_hours = hours if hours <= 12 else hours - 12
+        return f"{display_hours}:{minutes:02d} {am_pm}"
+    
+    def _determine_death_cause(self, enemy) -> str:
+        """Determine the cause of death based on enemy and game state"""
+        if isinstance(enemy, Jonathan):
+            if self.player and self.player.inventory.get("egg", False):
+                return "caught without giving egg"
+            else:
+                return "caught with no egg to offer"
+        elif isinstance(enemy, Jeromathy):
+            if self.player and self.player.inventory["snacks"] == 0:
+                return "letting snacks run out"
+            else:
+                return "angering Jeromathy"
+        elif isinstance(enemy, Angellica):
+            if self.player and self.player.on_youtube:
+                return "watching YouTube on the job"
+            else:
+                return "not coding for too long"
+        else:
+            return "carelessness"
     
     def update_victory(self, dt: float):
         keys = pygame.key.get_pressed()
@@ -1277,24 +1363,35 @@ class Game:
     
     def draw_game_over(self):
         # Show jumpscare if active
-        if self.jumpscare_active and self.jumpscare_image:
+        if self.jumpscare_active:
             # Black background
             self.screen.fill(BLACK)
             
-            # Scale the enemy image to fill most of the screen
-            image_rect = self.jumpscare_image.get_rect()
-            scale_factor = max(SCREEN_WIDTH / image_rect.width, SCREEN_HEIGHT / image_rect.height) * 1.2
-            scaled_width = int(image_rect.width * scale_factor)
-            scaled_height = int(image_rect.height * scale_factor)
-            jumpscare_scaled = pygame.transform.scale(self.jumpscare_image, (scaled_width, scaled_height))
-            
-            # Center the image with slight random offset for shake effect
-            import random
-            shake_x = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
-            shake_y = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
-            x = (SCREEN_WIDTH - scaled_width) // 2 + shake_x
-            y = (SCREEN_HEIGHT - scaled_height) // 2 + shake_y
-            self.screen.blit(jumpscare_scaled, (x, y))
+            if self.jumpscare_image:
+                # Scale the enemy image to fill most of the screen
+                image_rect = self.jumpscare_image.get_rect()
+                scale_factor = max(SCREEN_WIDTH / image_rect.width, SCREEN_HEIGHT / image_rect.height) * 1.2
+                scaled_width = int(image_rect.width * scale_factor)
+                scaled_height = int(image_rect.height * scale_factor)
+                jumpscare_scaled = pygame.transform.scale(self.jumpscare_image, (scaled_width, scaled_height))
+                
+                # Center the image with slight random offset for shake effect
+                import random
+                shake_x = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
+                shake_y = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
+                x = (SCREEN_WIDTH - scaled_width) // 2 + shake_x
+                y = (SCREEN_HEIGHT - scaled_height) // 2 + shake_y
+                self.screen.blit(jumpscare_scaled, (x, y))
+            else:
+                # Fallback if image didn't load: show enemy name in large text
+                import random
+                if self.killer_enemy:
+                    jumpscare_font = pygame.font.Font(None, 150)
+                    shake_x = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
+                    shake_y = random.randint(-10, 10) if self.jumpscare_timer < 0.3 else 0
+                    jumpscare_surf = jumpscare_font.render(self.killer_enemy.name, True, RED)
+                    jumpscare_rect = jumpscare_surf.get_rect(center=(SCREEN_WIDTH // 2 + shake_x, SCREEN_HEIGHT // 2 + shake_y))
+                    self.screen.blit(jumpscare_surf, jumpscare_rect)
             
             # Red flash effect at the beginning
             if self.jumpscare_timer < 0.2:
@@ -1325,20 +1422,58 @@ class Game:
         text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
         self.screen.blit(text_surf, text_rect)
         
-        # Reason with killer name
-        reason_font = pygame.font.Font(None, 40)
+        # Killer name
+        killer_font = pygame.font.Font(None, 40)
         if self.killer_enemy:
-            reason_text = f"You were caught by {self.killer_enemy.name}!"
+            killer_text = f"Caught by {self.killer_enemy.name}"
         else:
-            reason_text = "You didn't survive your shift"
-        reason_surf = reason_font.render(reason_text, True, LIGHT_GRAY)
-        reason_rect = reason_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30))
-        self.screen.blit(reason_surf, reason_rect)
+            killer_text = "You didn't survive your shift"
+        killer_surf = killer_font.render(killer_text, True, LIGHT_GRAY)
+        killer_rect = killer_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30))
+        self.screen.blit(killer_surf, killer_rect)
+        
+        # AI-generated death message (with word wrapping for long messages)
+        if self.death_message:
+            message_font = pygame.font.Font(None, 32)
+            
+            # Word wrap the message if it's too long
+            max_width = SCREEN_WIDTH - 100
+            words = self.death_message.split(' ')
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                test_line = current_line + word + " "
+                test_surf = message_font.render(test_line, True, YELLOW)
+                if test_surf.get_width() > max_width and current_line:
+                    lines.append(current_line.strip())
+                    current_line = word + " "
+                else:
+                    current_line = test_line
+            
+            if current_line:
+                lines.append(current_line.strip())
+            
+            # Draw each line
+            y_offset = 80
+            for i, line in enumerate(lines):
+                msg_surf = message_font.render(line, True, YELLOW)
+                msg_rect = msg_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + y_offset + i * 35))
+                
+                # Add subtle shadow for readability
+                shadow_surf = message_font.render(line, True, (40, 40, 0))
+                shadow_rect = shadow_surf.get_rect(center=(SCREEN_WIDTH // 2 + 2, SCREEN_HEIGHT // 2 + y_offset + i * 35 + 2))
+                self.screen.blit(shadow_surf, shadow_rect)
+                self.screen.blit(msg_surf, msg_rect)
+            
+            restart_y = SCREEN_HEIGHT // 2 + y_offset + len(lines) * 35 + 30
+        else:
+            restart_y = SCREEN_HEIGHT // 2 + 120
         
         # Restart instruction
         restart_font = pygame.font.Font(None, 32)
         restart_surf = restart_font.render("Press SPACE to restart", True, WHITE)
-        restart_rect = restart_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 100))
+        restart_rect = restart_surf.get_rect(center=(SCREEN_WIDTH // 2, restart_y))
         self.screen.blit(restart_surf, restart_rect)
     
     def draw_victory(self):
@@ -1350,20 +1485,58 @@ class Game:
         # Victory text
         font = pygame.font.Font(None, 100)
         text_surf = font.render("VICTORY!", True, YELLOW)
-        text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
+        text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 80))
         self.screen.blit(text_surf, text_rect)
         
-        # Message
-        msg_font = pygame.font.Font(None, 40)
-        msg_text = "You survived your workday at Rocket!"
-        msg_surf = msg_font.render(msg_text, True, WHITE)
-        msg_rect = msg_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30))
-        self.screen.blit(msg_surf, msg_rect)
+        # Subtitle
+        subtitle_font = pygame.font.Font(None, 36)
+        subtitle_text = "You survived until 5pm!"
+        subtitle_surf = subtitle_font.render(subtitle_text, True, WHITE)
+        subtitle_rect = subtitle_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20))
+        self.screen.blit(subtitle_surf, subtitle_rect)
+        
+        # AI-generated victory message (with word wrapping)
+        if self.death_message:  # Reusing the message field for victory too
+            message_font = pygame.font.Font(None, 32)
+            
+            # Word wrap the message if it's too long
+            max_width = SCREEN_WIDTH - 100
+            words = self.death_message.split(' ')
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                test_line = current_line + word + " "
+                test_surf = message_font.render(test_line, True, (255, 255, 150))
+                if test_surf.get_width() > max_width and current_line:
+                    lines.append(current_line.strip())
+                    current_line = word + " "
+                else:
+                    current_line = test_line
+            
+            if current_line:
+                lines.append(current_line.strip())
+            
+            # Draw each line
+            y_offset = 40
+            for i, line in enumerate(lines):
+                msg_surf = message_font.render(line, True, (255, 255, 150))
+                msg_rect = msg_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + y_offset + i * 35))
+                
+                # Add subtle shadow for readability
+                shadow_surf = message_font.render(line, True, (80, 80, 0))
+                shadow_rect = shadow_surf.get_rect(center=(SCREEN_WIDTH // 2 + 2, SCREEN_HEIGHT // 2 + y_offset + i * 35 + 2))
+                self.screen.blit(shadow_surf, shadow_rect)
+                self.screen.blit(msg_surf, msg_rect)
+            
+            restart_y = SCREEN_HEIGHT // 2 + y_offset + len(lines) * 35 + 40
+        else:
+            restart_y = SCREEN_HEIGHT // 2 + 100
         
         # Restart instruction
         restart_font = pygame.font.Font(None, 32)
         restart_surf = restart_font.render("Press SPACE to return to menu", True, WHITE)
-        restart_rect = restart_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 100))
+        restart_rect = restart_surf.get_rect(center=(SCREEN_WIDTH // 2, restart_y))
         self.screen.blit(restart_surf, restart_rect)
         
         # Particle celebration
