@@ -17,6 +17,13 @@ pygame.display.set_caption("Office Nightmare")
 # Create surfaces for caching
 cached_surfaces = {}
 
+# Load camera images
+camera_images = [
+    pygame.image.load("entrance.jpg"),
+    pygame.image.load("hallway.jpg"),
+    pygame.image.load("break_room.jpg")
+]
+
 # Print to console
 print("Hello World")
 
@@ -1206,60 +1213,14 @@ while running:
         # Camera mode - show selected room with FNAF-style camera effect
         screen.fill(BLACK)
         
-        # Draw the selected room view
+        # Draw the selected room view using external images
         camera_room = selected_camera
         room_surface = pygame.Surface((width - 100, height - 150))
         
-        # Draw textured floor
-        draw_floor_with_texture(room_surface, rooms[camera_room]['floor_color'], camera_room)
-        
-        # Draw walls with texture
-        for wall in rooms[camera_room]['walls']:
-            draw_wall_with_texture(room_surface, wall, WALL_ACCENT)
-        
-        # Draw furniture sprites for this room
-        for furn_sprite in furniture_sprites:
-            if furn_sprite.room == camera_room:
-                # Draw shadow first
-                shadow_pos = (furn_sprite.rect.x + 4, furn_sprite.rect.bottom)
-                room_surface.blit(furn_sprite.shadow, shadow_pos)
-                
-                # Draw furniture
-                room_surface.blit(furn_sprite.image, furn_sprite.rect)
-                
-                # Highlight supply stations with glow when snacks are low
-                if furn_sprite.furniture_data.get('type') == 'supply' and snacks_stocked < snacks_needed:
-                    supply_color = (255, 215, 0)  # Gold
-                    glow_surf, glow_pos = create_glow_effect(
-                        furn_sprite.rect.centerx, furn_sprite.rect.centery,
-                        25, supply_color, 80
-                    )
-                    room_surface.blit(glow_surf, glow_pos)
-                    pygame.draw.rect(room_surface, supply_color, furn_sprite.rect, 3)
-                
-                # Draw labels
-                if furn_sprite.label:
-                    font = pygame.font.Font(None, 16)
-                    text = font.render(furn_sprite.label, True, BLOOD_RED)
-                    text_rect = text.get_rect(center=furn_sprite.rect.center)
-                    room_surface.blit(text, text_rect)
-        
-        # Draw Jerome if he's in this camera view
-        if jerome_active and jerome_room == camera_room:
-            # Draw Jerome's shadow
-            shadow_pos = (jerome_x + 4, jerome_y + jerome_size)
-            room_surface.blit(jerome_sprite.shadow, shadow_pos)
-            
-            # Draw ominous glow around Jerome
-            glow_surf, glow_pos = create_glow_effect(
-                jerome_x + jerome_size // 2, jerome_y + jerome_size // 2,
-                30, (120, 20, 20), 60
-            )
-            room_surface.blit(glow_surf, glow_pos)
-            
-            # Draw Jerome sprite
-            jerome_sprite.rect.topleft = (jerome_x, jerome_y)
-            room_surface.blit(jerome_sprite.image, jerome_sprite.rect)
+        # Load and scale the camera image to fit the view
+        camera_img = camera_images[selected_camera]
+        scaled_img = pygame.transform.scale(camera_img, (width - 100, height - 150))
+        room_surface.blit(scaled_img, (0, 0))
         
         # Apply static/noise effect
         static_surface = pygame.Surface((width - 100, height - 150), pygame.SRCALPHA)
@@ -1291,7 +1252,7 @@ while running:
         pygame.draw.rect(screen, WALL_DARK, (45, 70, width - 90, height - 140), 5)
         
         # Camera UI
-        camera_names = ["CAM 1: Office", "CAM 2: Hallway", "CAM 3: Breakroom"]
+        camera_names = ["CAM 1: Entrance", "CAM 2: Hallway", "CAM 3: Breakroom"]
         ui_font = pygame.font.Font(None, 28)
         title_text = ui_font.render(camera_names[selected_camera], True, (150, 255, 150))
         screen.blit(title_text, (60, 30))
