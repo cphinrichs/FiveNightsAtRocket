@@ -437,7 +437,13 @@ class Angellica(Enemy):
                 # Player is working in meeting room, go back to desk
                 self.meeting_room_check_complete = True
                 self.checking_meeting_room = False
-            
+        
+        # If Angellica is in the meeting room and player is working, force her to leave
+        if self.current_room == RoomType.MEETING_ROOM and game_state == GameState.WORKING:
+            # Player started working, stop chasing and return to hallway first, then desk
+            self.state = "returning_to_hallway"
+            self.checking_meeting_room = False
+        
         # Chase player if state is chasing
         if self.state == "chasing":
             px, py = player.get_center()
@@ -458,6 +464,31 @@ class Angellica(Enemy):
                     self.direction = Direction.RIGHT if dx > 0 else Direction.LEFT
                 else:
                     self.direction = Direction.DOWN if dy > 0 else Direction.UP
+        elif self.state == "returning_to_hallway":
+            # First move to hallway, then to desk
+            hallway = rooms.get(RoomType.HALLWAY)
+            if hallway:
+                hx = hallway.x + hallway.width // 2
+                hy = hallway.y + hallway.height // 2
+                ex, ey = self.get_center()
+                
+                dx_to_hallway = hx - ex
+                dy_to_hallway = hy - ey
+                dist_to_hallway = math.sqrt(dx_to_hallway * dx_to_hallway + dy_to_hallway * dy_to_hallway)
+                
+                if self.current_room == RoomType.HALLWAY:
+                    # Now in hallway, can return to desk
+                    self.state = "idle"
+                elif dist_to_hallway > 5:
+                    dx_to_hallway /= dist_to_hallway
+                    dy_to_hallway /= dist_to_hallway
+                    self.x += dx_to_hallway * self.speed * 1.2 * dt  # Move faster when retreating
+                    self.y += dy_to_hallway * self.speed * 1.2 * dt
+                    
+                    if abs(dx_to_hallway) > abs(dy_to_hallway):
+                        self.direction = Direction.RIGHT if dx_to_hallway > 0 else Direction.LEFT
+                    else:
+                        self.direction = Direction.DOWN if dy_to_hallway > 0 else Direction.UP
         else:
             # Return to desk
             self.state = "idle"

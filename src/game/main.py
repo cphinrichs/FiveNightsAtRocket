@@ -61,7 +61,7 @@ class Game:
         # Game time
         self.current_time = 9.0  # 9:00 AM
         self.target_time = 17.0  # 5:00 PM
-        self.time_speed = 1.0  # Hours per real second
+        self.time_speed = 1.0 / 60.0  # Hours per real second (1 hour = 60 seconds, so full day = 8 minutes)
         
         # Bandwidth
         self.bandwidth = 100
@@ -1270,8 +1270,8 @@ class Game:
     
     def update_slacking(self, dt: float):
         """Update slacking mode - enemies still move, time still passes"""
-        # Time progresses at normal speed
-        self.current_time += (dt / 60.0) * self.time_speed
+        # Time progresses at normal speed (1 hour per real second)
+        self.current_time += dt * self.time_speed
         
         # Check victory condition
         if self.current_time >= self.target_time:
@@ -1323,8 +1323,8 @@ class Game:
         # Reset coding timer (player is actively coding)
         self.last_coding_time = 0.0
         
-        # Time progresses at normal speed
-        self.current_time += (dt / 60.0) * self.time_speed
+        # Time progresses at normal speed (1 hour per real second)
+        self.current_time += dt * self.time_speed
         
         # Check victory condition
         if self.current_time >= self.target_time:
@@ -2038,29 +2038,20 @@ class Game:
         title_rect = title_surf.get_rect(center=(SCREEN_WIDTH // 2, 80))
         self.screen.blit(title_surf, title_rect)
         
-        # Time display
-        time_font = pygame.font.Font(None, 48)
-        hours = int(self.current_time // 60)
-        minutes = int(self.current_time % 60)
-        time_text = f"Time: {hours}:{minutes:02d}"
-        time_surf = time_font.render(time_text, True, WHITE)
-        time_rect = time_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
-        self.screen.blit(time_surf, time_rect)
-        
         # Bandwidth meter
         bandwidth_font = pygame.font.Font(None, 40)
         bandwidth_percent = int((self.bandwidth / self.max_bandwidth) * 100)
         bandwidth_text = f"Bandwidth: {bandwidth_percent}%"
         bandwidth_color = GREEN if bandwidth_percent > 50 else YELLOW if bandwidth_percent > 25 else RED
         bandwidth_surf = bandwidth_font.render(bandwidth_text, True, bandwidth_color)
-        bandwidth_rect = bandwidth_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        bandwidth_rect = bandwidth_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
         self.screen.blit(bandwidth_surf, bandwidth_rect)
         
         # Bandwidth bar
         bar_width = 400
         bar_height = 30
         bar_x = SCREEN_WIDTH // 2 - bar_width // 2
-        bar_y = 290
+        bar_y = 220
         pygame.draw.rect(self.screen, GRAY, (bar_x, bar_y, bar_width, bar_height), 2)
         fill_width = int((self.bandwidth / self.max_bandwidth) * bar_width)
         if fill_width > 0:
@@ -2105,29 +2096,20 @@ class Game:
         title_rect = title_surf.get_rect(center=(SCREEN_WIDTH // 2, 80))
         self.screen.blit(title_surf, title_rect)
         
-        # Time display
-        time_font = pygame.font.Font(None, 48)
-        hours = int(self.current_time // 60)
-        minutes = int(self.current_time % 60)
-        time_text = f"Time: {hours}:{minutes:02d}"
-        time_surf = time_font.render(time_text, True, WHITE)
-        time_rect = time_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
-        self.screen.blit(time_surf, time_rect)
-        
         # Bandwidth meter with warning colors
         bandwidth_font = pygame.font.Font(None, 40)
         bandwidth_percent = int((self.bandwidth / self.max_bandwidth) * 100)
         bandwidth_text = f"Bandwidth: {bandwidth_percent}%"
         bandwidth_color = GREEN if bandwidth_percent > 50 else YELLOW if bandwidth_percent > 25 else RED
         bandwidth_surf = bandwidth_font.render(bandwidth_text, True, bandwidth_color)
-        bandwidth_rect = bandwidth_surf.get_rect(center=(SCREEN_WIDTH // 2, 250))
+        bandwidth_rect = bandwidth_surf.get_rect(center=(SCREEN_WIDTH // 2, 180))
         self.screen.blit(bandwidth_surf, bandwidth_rect)
         
         # Bandwidth bar
         bar_width = 400
         bar_height = 30
         bar_x = SCREEN_WIDTH // 2 - bar_width // 2
-        bar_y = 290
+        bar_y = 220
         pygame.draw.rect(self.screen, GRAY, (bar_x, bar_y, bar_width, bar_height), 2)
         fill_width = int((self.bandwidth / self.max_bandwidth) * bar_width)
         if fill_width > 0:
@@ -2137,7 +2119,7 @@ class Game:
         drain_font = pygame.font.Font(None, 32)
         drain_text = f"Draining at {self.bandwidth_drain_rate:.1f}/sec"
         drain_surf = drain_font.render(drain_text, True, RED)
-        drain_rect = drain_surf.get_rect(center=(SCREEN_WIDTH // 2, 340))
+        drain_rect = drain_surf.get_rect(center=(SCREEN_WIDTH // 2, 270))
         self.screen.blit(drain_surf, drain_rect)
         
         # Controls hint
