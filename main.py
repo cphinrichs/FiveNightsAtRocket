@@ -24,6 +24,10 @@ camera_images = [
     pygame.image.load("break_room.jpg")
 ]
 
+# Load office state images
+working_image = pygame.image.load("working.jpg")
+slacking_image = pygame.image.load("slacking.jpg")
+
 # Print to console
 print("Hello World")
 
@@ -66,11 +70,16 @@ player_speed = 4  # Smoother speed
 player_color = (70, 130, 180)  # Steel blue for office worker
 
 # Game mode
-game_mode = "tutorial"  # "tutorial", "camera", "walk"
-selected_camera = 0  # Which room camera is viewing
+game_mode = "office"  # "tutorial", "office", "camera", "walk"
+selected_camera = 0  # Which room camera is viewing (0=Entrance, 1=Hallway, 2=Breakroom)
 
 # Game state
 game_state = "playing"  # "playing", "game_over"
+
+# WIFI resource system
+wifi = 100.0  # WIFI percentage (0-100)
+wifi_drain_rate = 0.05  # WIFI drains per frame when viewing cameras
+at_desk = False  # True = working.jpg (at desk), False = slacking.jpg (away from desk)
 
 # Particle System
 class Particle:
@@ -789,14 +798,14 @@ while running:
                 jerome_state = "patrolling"
                 jerome_patrol_timer = pygame.time.get_ticks()
             
-            if game_mode == "camera":
-                if event.key == pygame.K_1:
-                    selected_camera = 0
-                elif event.key == pygame.K_2:
-                    selected_camera = 1
-                elif event.key == pygame.K_3:
-                    selected_camera = 2
-                elif event.key == pygame.K_SPACE or event.key == pygame.K_w:
+            if game_mode == "office":
+                if event.key == pygame.K_s:
+                    # Toggle between working (at desk) and slacking (away from desk)
+                    at_desk = not at_desk
+                elif event.key == pygame.K_SPACE or event.key == pygame.K_c:
+                    # Open cameras
+                    game_mode = "camera"
+                elif event.key == pygame.K_w:
                     # Switch to walk mode
                     game_mode = "walk"
                     current_room = 0  # Start in office room
@@ -804,14 +813,41 @@ while running:
                     player_y = 50
                     walls = rooms[current_room]['walls']
                     transitions = rooms[current_room]['transitions']
+            
+            elif game_mode == "camera":
+                if event.key == pygame.K_1:
+                    selected_camera = 0
+                elif event.key == pygame.K_2:
+                    selected_camera = 1
+                elif event.key == pygame.K_3:
+                    selected_camera = 2
+                elif event.key == pygame.K_ESCAPE or event.key == pygame.K_SPACE:
+                    # Close cameras, return to office
+                    game_mode = "office"
+            
             elif game_mode == "walk":
                 if event.key == pygame.K_ESCAPE or event.key == pygame.K_c:
-                    # Switch back to camera mode
-                    game_mode = "camera"
+                    # Switch back to office mode
+                    game_mode = "office"
     
     # Get current time
     current_time = pygame.time.get_ticks()
     elapsed_time = (current_time - start_time) / 1000  # Convert to seconds
+    
+    # WIFI Drain System - drains when viewing cameras OR when at desk working
+    if wifi > 0:
+        if game_mode == "camera":
+            # Drain when viewing cameras
+            wifi -= wifi_drain_rate
+            wifi = max(0, wifi)  # Don't go below 0
+        elif game_mode == "office" and at_desk:
+            # Drain when working at desk
+            wifi -= wifi_drain_rate
+            wifi = max(0, wifi)  # Don't go below 0
+    
+    # Check for WIFI depletion game over
+    if wifi <= 0 and game_state == "playing":
+        game_state = "game_over"
     
     # ChatGPT Joke Fetch Timer
     if chatgpt_available and current_time - joke_fetch_timer > joke_fetch_interval:
@@ -1209,7 +1245,61 @@ while running:
                 break
     
     # Draw based on mode
-    if game_mode == "camera":
+    if game_mode == "office":
+        # Office mode - show working or slacking image (no camera effects)
+        screen.fill(BLACK)
+        
+        # Display the appropriate office image
+        office_img = working_image if at_desk else slacking_image
+        scaled_office_img = pygame.transform.scale(office_img, (width, height))
+        screen.blit(scaled_office_img, (0, 0))
+        
+        # Office UI
+        ui_font = pygame.font.Font(None, 24)
+        
+        # Instructions
+        instructions = [
+            "S - Toggle Work/Slack",
+            "SPACE/C - Open Cameras",
+            "W - Walk Mode"
+        ]
+        for i, inst in enumerate(instructions):
+            text = ui_font.render(inst, True, (200, 200, 200))
+            # Add semi-transparent background for readability
+            text_bg = pygame.Surface((text.get_width() + 10, text.get_height() + 6), pygame.SRCALPHA)
+            pygame.draw.rect(text_bg, (0, 0, 0, 180), text_bg.get_rect(), border_radius=5)
+            text_bg.blit(text, (5, 3))
+            screen.blit(text_bg, (10, 10 + i * 30))
+        
+        # WIFI Display
+        wifi_font = pygame.font.Font(None, 32)
+        wifi_color = GREEN if wifi > 50 else YELLOW if wifi > 20 else RED
+        wifi_text = wifi_font.render(f"WIFI: {int(wifi)}%", True, wifi_color)
+        wifi_bg = pygame.Surface((wifi_text.get_width() + 10, wifi_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(wifi_bg, (0, 0, 0, 180), wifi_bg.get_rect(), border_radius=5)
+        wifi_bg.blit(wifi_text, (5, 3))
+        screen.blit(wifi_bg, (width - wifi_bg.get_width() - 10, height - 50))
+        
+        # Desk status indicator
+        status_font = pygame.font.Font(None, 28)
+        status_text = "AT DESK" if at_desk else "SLACKING"
+        status_color = (255, 100, 100) if at_desk else (100, 255, 100)
+        status_render = status_font.render(status_text, True, status_color)
+        status_bg = pygame.Surface((status_render.get_width() + 10, status_render.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(status_bg, (0, 0, 0, 180), status_bg.get_rect(), border_radius=5)
+        status_bg.blit(status_render, (5, 3))
+        screen.blit(status_bg, (width - status_bg.get_width() - 10, height - 90))
+        
+        # Draining indicator when at desk
+        if at_desk:
+            drain_font = pygame.font.Font(None, 20)
+            drain_text = drain_font.render("DRAINING...", True, (255, 100, 100))
+            drain_bg = pygame.Surface((drain_text.get_width() + 10, drain_text.get_height() + 6), pygame.SRCALPHA)
+            pygame.draw.rect(drain_bg, (0, 0, 0, 180), drain_bg.get_rect(), border_radius=5)
+            drain_bg.blit(drain_text, (5, 3))
+            screen.blit(drain_bg, (width - drain_bg.get_width() - 10, height - 120))
+    
+    elif game_mode == "camera":
         # Camera mode - show selected room with FNAF-style camera effect
         screen.fill(BLACK)
         
@@ -1217,9 +1307,11 @@ while running:
         camera_room = selected_camera
         room_surface = pygame.Surface((width - 100, height - 150))
         
-        # Load and scale the camera image to fit the view
-        camera_img = camera_images[selected_camera]
-        scaled_img = pygame.transform.scale(camera_img, (width - 100, height - 150))
+        # Show the camera images
+        base_img = camera_images[selected_camera]
+        
+        # Load and scale the image to fit the view
+        scaled_img = pygame.transform.scale(base_img, (width - 100, height - 150))
         room_surface.blit(scaled_img, (0, 0))
         
         # Apply static/noise effect
@@ -1261,11 +1353,22 @@ while running:
         inst_font = pygame.font.Font(None, 22)
         instructions = [
             "1,2,3 - Switch Cameras",
-            "SPACE/W - Walk Mode"
+            "SPACE/ESC - Close Cameras"
         ]
         for i, inst in enumerate(instructions):
             text = inst_font.render(inst, True, (180, 180, 180))
             screen.blit(text, (60, height - 70 + i * 25))
+        
+        # WIFI Display (FNAF-style power meter) - draining warning
+        wifi_font = pygame.font.Font(None, 32)
+        wifi_color = GREEN if wifi > 50 else YELLOW if wifi > 20 else RED
+        wifi_text = wifi_font.render(f"WIFI: {int(wifi)}%", True, wifi_color)
+        screen.blit(wifi_text, (width - 200, height - 50))
+        
+        # Draining indicator
+        status_font = pygame.font.Font(None, 20)
+        drain_text = status_font.render("DRAINING...", True, (255, 100, 100))
+        screen.blit(drain_text, (width - 200, height - 75))
         
         # Camera indicator boxes
         for i in range(3):
@@ -1441,6 +1544,15 @@ while running:
         walk_inst_font = pygame.font.Font(None, 18)
         walk_text = walk_inst_font.render("ESC/C - Cameras | SHIFT - Sprint | E - Pickup/Deliver", True, (180, 180, 180))
         screen.blit(walk_text, (10, height - 25))
+        
+        # WIFI Display in walk mode
+        wifi_font = pygame.font.Font(None, 28)
+        wifi_color = GREEN if wifi > 50 else YELLOW if wifi > 20 else RED
+        wifi_text = wifi_font.render(f"WIFI: {int(wifi)}%", True, wifi_color)
+        wifi_bg = pygame.Surface((wifi_text.get_width() + 10, wifi_text.get_height() + 6), pygame.SRCALPHA)
+        pygame.draw.rect(wifi_bg, (0, 0, 0, 180), wifi_bg.get_rect(), border_radius=5)
+        wifi_bg.blit(wifi_text, (5, 3))
+        screen.blit(wifi_bg, (width - wifi_bg.get_width() - 10, 10))
     
     # Draw objective text (big and clear)
     if game_mode != "tutorial":
