@@ -1033,8 +1033,8 @@ class Game:
         
         # Draw full-screen panning background for hallway FIRST (behind everything)
         if self.camera_selected_room == RoomType.HALLWAY and self.hallway_bg_image:
-            # Scale the background image to be much larger (3x zoomed in)
-            zoom_factor = 3.0
+            # Scale the background image to be much larger (2.5x zoomed in)
+            zoom_factor = 2.0
             bg_width = int(SCREEN_WIDTH * zoom_factor)
             bg_height = int(SCREEN_HEIGHT * zoom_factor)
             bg_scaled = pygame.transform.scale(self.hallway_bg_image, (bg_width, bg_height))
@@ -1090,8 +1090,8 @@ class Game:
         
         # Draw full-screen panning background for classroom FIRST (behind everything)
         if self.camera_selected_room == RoomType.CLASSROOM and self.classroom_bg_image:
-            # Scale the background image to be much larger (3x zoomed in)
-            zoom_factor = 3.0
+            # Scale the background image to be much larger (2.0x zoomed in)
+            zoom_factor = 2.0
             bg_width = int(SCREEN_WIDTH * zoom_factor)
             bg_height = int(SCREEN_HEIGHT * zoom_factor)
             bg_scaled = pygame.transform.scale(self.classroom_bg_image, (bg_width, bg_height))
@@ -1122,8 +1122,9 @@ class Game:
             
             # Create room surface
             room_surface = pygame.Surface((room.width, room.height), pygame.SRCALPHA)
-            if self.camera_selected_room != RoomType.HALLWAY or not self.hallway_bg_image:
-                room_surface.fill((80, 80, 90))  # Only fill if no background image
+            
+            # Draw the room (walls and floor)
+            room.draw(room_surface, (room.x, room.y))
             
             # Draw room elements relative to room position
             temp_offset = (room.x, room.y)
