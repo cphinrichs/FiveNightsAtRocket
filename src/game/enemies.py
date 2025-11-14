@@ -154,14 +154,18 @@ class Enemy(Entity):
         # Get or create sprite for current state
         if self.state != self.last_state:
             # Generate new sprite if state changed
+            intern_id = getattr(self, 'intern_id', 1)  # Get intern_id if it exists, default to 1
             self.sprite_cache[self.state] = create_enemy_sprite(self.width, self.height, 
-                                                                 self.color, self.state)
+                                                                 self.color, self.state,
+                                                                 self.name, intern_id)
             self.last_state = self.state
         
         sprite = self.sprite_cache.get(self.state)
         if not sprite:
             # Fallback: create sprite if not in cache
-            sprite = create_enemy_sprite(self.width, self.height, self.color, self.state)
+            intern_id = getattr(self, 'intern_id', 1)
+            sprite = create_enemy_sprite(self.width, self.height, self.color, self.state,
+                                        self.name, intern_id)
             self.sprite_cache[self.state] = sprite
         
         surface.blit(sprite, (screen_x, screen_y))
@@ -468,9 +472,17 @@ class NextGenIntern(Enemy):
     Doesn't harm the player directly.
     """
     
+    # Class variable to track intern count for unique images
+    _intern_counter = 0
+    
     def __init__(self, x: float, y: float):
         """Initialize NextGenIntern at classroom position."""
         super().__init__(x, y, 38, 38, (100, 200, 100), "NextGen Intern")
+        
+        # Assign unique intern ID (cycles through 1, 2, 3)
+        NextGenIntern._intern_counter += 1
+        self.intern_id = ((NextGenIntern._intern_counter - 1) % 3) + 1
+        
         self.speed = 60
         self.state = "idle"
         self.snack_timer = 0

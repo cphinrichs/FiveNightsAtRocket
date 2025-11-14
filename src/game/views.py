@@ -92,60 +92,24 @@ def create_player_sprite(width: int, height: int, direction: Direction) -> pygam
 
 
 def create_enemy_sprite(width: int, height: int, color: Tuple[int, int, int], 
-                       state: str) -> pygame.Surface:
+                       state: str, name: str = "", intern_id: int = 1) -> pygame.Surface:
     """
-    Generate a sprite for an enemy character.
+    Generate a sprite for an enemy character using their character image.
     Enemy appearance changes based on their current state.
     
     Args:
         width, height: Sprite dimensions
-        color: Base RGB color of enemy
+        color: Base RGB color of enemy (used as fallback)
         state: Current behavior state (idle, chasing, eating, etc.)
+        name: Name of the enemy (used to load appropriate image)
+        intern_id: For NextGenIntern enemies, which intern image to use (1, 2, or 3)
         
     Returns:
         pygame.Surface with enemy sprite drawn on it
     """
-    sprite = pygame.Surface((width, height), pygame.SRCALPHA)
-    
-    # Draw body with gradient effect
-    pygame.draw.rect(sprite, color, (0, 0, width, height), border_radius=5)
-    
-    # Draw darker outline
-    darker_color = tuple(max(0, c - 50) for c in color)
-    pygame.draw.rect(sprite, darker_color, (0, 0, width, height), 3, border_radius=5)
-    
-    # Draw eyes based on state
-    center_x = width // 2
-    center_y = height // 2
-    
-    if state in ["chasing"]:
-        # Menacing red eyes when chasing
-        pygame.draw.circle(sprite, RED, (center_x - 8, center_y - 5), 6)
-        pygame.draw.circle(sprite, RED, (center_x + 8, center_y - 5), 6)
-        pygame.draw.circle(sprite, (255, 100, 100), (center_x - 8, center_y - 5), 3)
-        pygame.draw.circle(sprite, (255, 100, 100), (center_x + 8, center_y - 5), 3)
-    elif state in ["eating", "at_desk", "idle"]:
-        # Calm yellow/white eyes when idle or at desk
-        pygame.draw.circle(sprite, WHITE, (center_x - 8, center_y - 5), 6)
-        pygame.draw.circle(sprite, WHITE, (center_x + 8, center_y - 5), 6)
-        pygame.draw.circle(sprite, YELLOW, (center_x - 8, center_y - 5), 3)
-        pygame.draw.circle(sprite, YELLOW, (center_x + 8, center_y - 5), 3)
-    else:
-        # Default orange eyes
-        pygame.draw.circle(sprite, ORANGE, (center_x - 8, center_y - 5), 6)
-        pygame.draw.circle(sprite, ORANGE, (center_x + 8, center_y - 5), 6)
-        pygame.draw.circle(sprite, YELLOW, (center_x - 8, center_y - 5), 3)
-        pygame.draw.circle(sprite, YELLOW, (center_x + 8, center_y - 5), 3)
-    
-    # Draw state indicator dot
-    if state == "chasing":
-        pygame.draw.circle(sprite, RED, (width - 5, 5), 5)
-    elif state in ["eating", "at_desk"]:
-        pygame.draw.circle(sprite, GREEN, (width - 5, 5), 5)
-    elif state == "idle":
-        pygame.draw.circle(sprite, YELLOW, (width - 5, 5), 5)
-    
-    return sprite
+    # Import the function from sprites.py to use the implementation there
+    from sprites import create_enemy_sprite as _create_enemy_sprite
+    return _create_enemy_sprite(width, height, color, state, name, intern_id)
 
 
 def create_interactable_sprite(width: int, height: int, color: Tuple[int, int, int], 
@@ -319,13 +283,15 @@ class EnemyRenderer:
         screen_x = rect.x - camera_offset[0]
         screen_y = rect.y - camera_offset[1]
         
-        # Cache key combines enemy name and state
-        cache_key = f"{enemy.name}_{enemy.state}"
+        # Cache key combines enemy name, state, and intern_id if applicable
+        intern_id = getattr(enemy, 'intern_id', 1)
+        cache_key = f"{enemy.name}_{enemy.state}_{intern_id}"
         
         # Get or create sprite for current state
         if cache_key not in self.sprite_cache:
             self.sprite_cache[cache_key] = create_enemy_sprite(
-                enemy.width, enemy.height, enemy.color, enemy.state
+                enemy.width, enemy.height, enemy.color, enemy.state,
+                enemy.name, intern_id
             )
         
         # Draw sprite
