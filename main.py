@@ -350,6 +350,8 @@ jonathan_joke_fetch_timer = 0
 jonathan_joke_fetch_interval = 10000  # Fetch new joke every 10 seconds
 jonathan_joke_display_duration = 10000  # Show joke for 10 seconds
 is_fetching_joke = False
+recent_jokes = []  # Track recent jokes to avoid repeats
+max_recent_jokes = 5  # Remember last 5 jokes
 
 # Initialize OpenAI client (set your API key as environment variable OPENAI_API_KEY)
 try:
@@ -362,7 +364,7 @@ except:
 
 def fetch_joke_from_chatgpt():
     """Fetch a joke from ChatGPT in a separate thread for Jonathan"""
-    global jonathan_joke_text, is_fetching_joke
+    global jonathan_joke_text, is_fetching_joke, recent_jokes
     
     if not chatgpt_available:
         return
@@ -370,18 +372,48 @@ def fetch_joke_from_chatgpt():
     is_fetching_joke = True
     
     try:
+        # Vary the prompts to get more diverse jokes
+        joke_prompts = [
+            "Tell me a hilarious one-liner joke.",
+            "Give me a short, unexpected punchline joke.",
+            "Tell me a clever wordplay joke in 1-2 sentences.",
+            "Share a quick, funny observational joke.",
+            "Tell me an absurd, surreal joke (keep it brief).",
+            "Give me a witty joke about everyday life.",
+            "Tell me a dad joke that's actually funny.",
+            "Share a short joke with a twist ending.",
+            "Tell me a silly knock-knock joke variant.",
+            "Give me a humorous tech or science joke."
+        ]
+        
+        # Build a prompt that avoids recent jokes
+        prompt = random.choice(joke_prompts)
+        if recent_jokes:
+            prompt += f"\n\nDon't repeat these recent jokes: {'; '.join(recent_jokes[-3:])}"
+        
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a comedian. Tell very short, funny jokes (1-2 sentences max)."},
-                {"role": "user", "content": "Tell me a random funny joke."}
+                {"role": "system", "content": "You are a creative comedian. Tell very short, unique jokes (1-2 sentences max). Be original and avoid clichés."},
+                {"role": "user", "content": prompt}
             ],
-            max_tokens=50,
-            temperature=0.9
+            max_tokens=60,
+            temperature=0.8,  # Balanced creativity and coherence
+            presence_penalty=0.3,  # Mild encouragement for novel content
+            frequency_penalty=0.3  # Mild discouragement of repetition
         )
         
         new_joke = response.choices[0].message.content.strip()
-        jonathan_joke_text = new_joke
+        
+        # Track recent jokes to avoid repeats
+        if new_joke not in recent_jokes:
+            jonathan_joke_text = new_joke
+            recent_jokes.append(new_joke)
+            if len(recent_jokes) > max_recent_jokes:
+                recent_jokes.pop(0)
+        else:
+            # If we got a repeat, just use it but don't add to history
+            jonathan_joke_text = new_joke
         
     except Exception as e:
         jonathan_joke_text = f"Joke error: {str(e)[:50]}..."
