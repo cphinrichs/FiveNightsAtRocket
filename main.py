@@ -64,6 +64,22 @@ OFFICE_GRAY = (50, 55, 60)
 DESK_BROWN = (55, 45, 35)
 CARPET_BLUE = (30, 35, 45)
 
+# Cache fonts for performance (create once, reuse)
+FONT_CACHE = {
+    'small': pygame.font.Font(None, 14),
+    'hint': pygame.font.Font(None, 20),
+    'name': pygame.font.Font(None, 20),
+    'fridge': pygame.font.Font(None, 22),
+    'stats': pygame.font.Font(None, 24),
+    'ui': pygame.font.Font(None, 26),
+    'warning': pygame.font.Font(None, 28),
+    'objective': pygame.font.Font(None, 28),
+    'time': pygame.font.Font(None, 30),
+    'congrats': pygame.font.Font(None, 36),
+    'title': pygame.font.Font(None, 48),
+    'big': pygame.font.Font(None, 72)
+}
+
 # Player settings
 player_size = 40
 player_x = 150  # Start away from furniture
@@ -173,9 +189,11 @@ class Player(Entity):
     def update_animation(self, moving):
         if moving:
             self.animation_frame = (self.animation_frame + 1) % 20
-            # Simple bobbing effect
-            offset = int(math.sin(self.animation_frame / 10 * math.pi) * 2)
-            self.create_sprite()
+            # Simple bobbing effect - don't recreate sprite every frame for performance
+            # Only update every few frames
+            if self.animation_frame % 5 == 0:
+                offset = int(math.sin(self.animation_frame / 10 * math.pi) * 2)
+                # Skip sprite recreation for better performance
 
 class Jerome(Entity):
     def __init__(self, x, y):
@@ -211,10 +229,12 @@ class Jerome(Entity):
     
     def update_animation(self):
         self.animation_frame = (self.animation_frame + 1) % 60
-        self.create_sprite()
+        # Only recreate sprite every 10 frames for performance
+        if self.animation_frame % 10 == 0:
+            self.create_sprite()
         
-        # Create menacing particles
-        if self.animation_frame % 15 == 0:
+        # Create menacing particles (reduced frequency)
+        if self.animation_frame % 30 == 0:
             particles.append(Particle(
                 self.rect.centerx + random.randint(-10, 10),
                 self.rect.bottom - 5,
@@ -1274,8 +1294,10 @@ while running:
                 jerome_path_index = 0
                 break
     
-    # Update particles
+    # Update particles (limit total count to 100 for performance)
     particles[:] = [p for p in particles if p.update()]
+    if len(particles) > 100:
+        particles = particles[-100:]
     
     # ============ JONATHAN AI - Pathfinding-based Patrol ============
     if jonathan_active:
@@ -1460,10 +1482,9 @@ while running:
         screen.blit(wifi_bg, (width - wifi_bg.get_width() - 10, height - 50))
         
         # Desk status indicator
-        status_font = pygame.font.Font(None, 28)
         status_text = "AT DESK" if at_desk else "SLACKING"
         status_color = (255, 100, 100) if at_desk else (100, 255, 100)
-        status_render = status_font.render(status_text, True, status_color)
+        status_render = FONT_CACHE['warning'].render(status_text, True, status_color)
         status_bg = pygame.Surface((status_render.get_width() + 10, status_render.get_height() + 6), pygame.SRCALPHA)
         pygame.draw.rect(status_bg, (0, 0, 0, 180), status_bg.get_rect(), border_radius=5)
         status_bg.blit(status_render, (5, 3))
@@ -1471,17 +1492,15 @@ while running:
         
         # Draining indicator when at desk
         if at_desk:
-            drain_font = pygame.font.Font(None, 20)
-            drain_text = drain_font.render("DRAINING...", True, (255, 100, 100))
+            drain_text = FONT_CACHE['hint'].render("DRAINING...", True, (255, 100, 100))
             drain_bg = pygame.Surface((drain_text.get_width() + 10, drain_text.get_height() + 6), pygame.SRCALPHA)
             pygame.draw.rect(drain_bg, (0, 0, 0, 180), drain_bg.get_rect(), border_radius=5)
             drain_bg.blit(drain_text, (5, 3))
             screen.blit(drain_bg, (width - drain_bg.get_width() - 10, height - 120))
         
         # Fridge Display (Jerome mechanic)
-        fridge_font = pygame.font.Font(None, 30)
         fridge_color = GREEN if fridge_level > 50 else YELLOW if fridge_level > 20 else RED
-        fridge_text = fridge_font.render(f"FRIDGE: {int(fridge_level)}%", True, fridge_color)
+        fridge_text = FONT_CACHE['time'].render(f"FRIDGE: {int(fridge_level)}%", True, fridge_color)
         fridge_bg = pygame.Surface((fridge_text.get_width() + 10, fridge_text.get_height() + 6), pygame.SRCALPHA)
         pygame.draw.rect(fridge_bg, (0, 0, 0, 180), fridge_bg.get_rect(), border_radius=5)
         fridge_bg.blit(fridge_text, (5, 3))
@@ -1773,8 +1792,8 @@ while running:
         
 
         
-        # Draw particles
-        for particle in particles:
+        # Draw particles (limit to 50 for performance)
+        for particle in particles[:50]:
             particle.draw(screen)
         
         # Draw player shadow
@@ -2039,11 +2058,10 @@ while running:
         pygame.draw.rect(overlay, (0, 0, 0, 200), overlay.get_rect())
         screen.blit(overlay, (0, 0))
         
-        game_over_font = pygame.font.Font(None, 72)
-        game_over_text = game_over_font.render("GAME OVER", True, RED)
+        game_over_text = FONT_CACHE['big'].render("GAME OVER", True, RED)
         screen.blit(game_over_text, (width // 2 - game_over_text.get_width() // 2, height // 2 - 100))
         
-        reason_font = pygame.font.Font(None, 36)
+        reason_font = FONT_CACHE['congrats']
         if wifi <= 0:
             reason = "WIFI ran out!"
         elif fridge_level <= 0:
@@ -2070,15 +2088,13 @@ while running:
         pygame.draw.rect(overlay, (0, 50, 0, 200), overlay.get_rect())
         screen.blit(overlay, (0, 0))
         
-        win_font = pygame.font.Font(None, 72)
-        win_text = win_font.render("YOU WIN!", True, (100, 255, 100))
+        win_text = FONT_CACHE['big'].render("YOU WIN!", True, (100, 255, 100))
         screen.blit(win_text, (width // 2 - win_text.get_width() // 2, height // 2 - 100))
         
-        congrats_font = pygame.font.Font(None, 36)
-        congrats_text = congrats_font.render("You survived the shift!", True, WHITE)
+        congrats_text = FONT_CACHE['congrats'].render("You survived the shift!", True, WHITE)
         screen.blit(congrats_text, (width // 2 - congrats_text.get_width() // 2, height // 2))
         
-        stats_font = pygame.font.Font(None, 28)
+        stats_font = FONT_CACHE['warning']
         stats_lines = [
             f"WIFI Remaining: {int(wifi)}%",
             f"Fridge Level: {int(fridge_level)}%",
@@ -2090,8 +2106,7 @@ while running:
     
     # Warning text
     elif warning_text and (current_time - warning_timer) < 3000:
-        warning_font = pygame.font.Font(None, 28)
-        warning_surface = warning_font.render(warning_text, True, (255, 200, 100))
+        warning_surface = FONT_CACHE['warning'].render(warning_text, True, (255, 200, 100))
         warning_bg = pygame.Surface((warning_surface.get_width() + 20, 40))
         warning_bg.fill(SHADOW_BLACK)
         warning_bg.set_alpha(200)
